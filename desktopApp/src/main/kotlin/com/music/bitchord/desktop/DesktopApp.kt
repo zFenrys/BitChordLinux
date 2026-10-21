@@ -1526,6 +1526,17 @@ fun BitChordDesktopApp() {
             if (partySyncHolder[0] === partySync) partySyncHolder[0] = null
         }
     }
+    // Bring back what was playing when the app was last closed. The queue is restored from
+    // preferences above, but nothing told the player about it, so the app opened empty.
+    // Loaded paused, and only if nothing else (a party, a click) has chosen a song yet.
+    LaunchedEffect(Unit) {
+        if (selectedSong == null && !DesktopListenTogether.state.value.inParty) {
+            liveQueue.current?.let { song ->
+                selectedSong = song
+                playbackEngine.load(song, playWhenReady = false)
+            }
+        }
+    }
     fun togglePlayPauseFromUser() {
         if (partySync.handleLockedPlayPause()) return
         playbackEngine.togglePlayPause()
