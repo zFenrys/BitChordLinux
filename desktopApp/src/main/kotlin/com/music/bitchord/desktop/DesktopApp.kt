@@ -3485,6 +3485,8 @@ internal fun BitChordDesktopApp(welcomeLaunch: DesktopWelcomeOnboarding.Launch) 
             val homePanelOverlaysFeed = destination == DesktopDestination.LISTEN_NOW &&
                 overlays.settingsPage == null && !overlays.replay && openedArtist == null && openedCollection == null
             DesktopFrame(
+                canGoBack = navHistory.isNotEmpty(),
+                onBack = ::goBack,
                 // The phone's page is black, not the near-black of its cards.
                 containerColor = DesktopBackground,
                 sidebarCollapsed = sidebarCollapsed,
@@ -6035,6 +6037,8 @@ internal fun DesktopFrame(
     sidebarDrawerOpen: Boolean,
     onSidebarCollapsedChange: (Boolean) -> Unit,
     onSidebarDrawerOpenChange: (Boolean) -> Unit,
+    canGoBack: Boolean = false,
+    onBack: () -> Unit = {},
     /**
      * The open page's own colours, painted across the whole window rather than only the content
      * area, so the title bar, top bar and sidebar take their tint from the page they are framing
@@ -6090,6 +6094,19 @@ internal fun DesktopFrame(
                             Column(Modifier.weight(1f).fillMaxHeight()) {
                                 // Only the legacy top player uses compact chrome at narrow widths.
                                 topBar(narrow)
+                                Row(
+                                    Modifier.fillMaxWidth().height(40.dp).padding(start = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    IconButton(onClick = onBack, enabled = canGoBack, modifier = Modifier.size(32.dp)) {
+                                        Icon(
+                                            Icons.AutoMirrored.Rounded.ArrowBack,
+                                            DesktopStrings["back", "Back"],
+                                            tint = if (canGoBack) DesktopForeground else DesktopSecondary.copy(alpha = 0.40f),
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                    }
+                                }
                                 DesktopPageWithSidePanel(
                                     overlayPanel = homePanelOverlay,
                                     modifier = Modifier.fillMaxWidth().weight(1f),
