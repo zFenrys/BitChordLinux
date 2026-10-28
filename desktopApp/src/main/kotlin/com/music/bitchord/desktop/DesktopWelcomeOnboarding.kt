@@ -35,7 +35,7 @@ internal object DesktopWelcomeOnboarding {
     internal fun inspect(preferences: Preferences, identity: String, forced: Boolean = false): Launch {
         val key = markerKey(identity)
         return Launch(
-            showWelcome = forced || !preferences.getBoolean(key, false),
+            showWelcome = forced,
             markerKey = key,
         )
     }
