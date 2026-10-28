@@ -22,7 +22,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import bitchord.desktopapp.generated.resources.Res
-import bitchord.desktopapp.generated.resources.logo
+import bitchord.desktopapp.generated.resources.app_icon
 import java.awt.Dimension
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -31,6 +31,7 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.painterResource
 
 fun main() {
+    DesktopStartupDiagnostics.record(DesktopStartupDiagnostics.Milestone.PROCESS_ENTRY)
     // Read the per-install welcome marker before services initialize or write preferences.
     val welcomeLaunch = DesktopWelcomeOnboarding.inspectStartup()
     // Before any WebView exists, so sign-in and PoToken pages share the same cookie jar.
@@ -83,11 +84,16 @@ private fun desktopMain(welcomeLaunch: DesktopWelcomeOnboarding.Launch) = applic
     LaunchedEffect(state) {
         snapshotFlow { state.placement }.collect(DesktopWindowMode::adopt)
     }
+    LaunchedEffect(visible, state.isMinimized) {
+        if (!visible || state.isMinimized) {
+            DesktopMemoryOptimizer.onWindowHidden()
+        }
+    }
     Window(
         onCloseRequest = { if (DesktopWindowVisibility.onCloseRequest()) exitApplication() },
         visible = visible,
         title = "BitChord",
-        icon = painterResource(Res.drawable.logo),
+        icon = painterResource(Res.drawable.app_icon),
         state = state,
         // The peer must be opaque and decorated from creation. Windows owns the entire
         // non-client frame: caption, drag, resize, system menu and Snap.
@@ -152,11 +158,13 @@ private fun desktopMain(welcomeLaunch: DesktopWelcomeOnboarding.Launch) = applic
                 repeat(10) {
                     if (DesktopWindowsCaptionAppearance.attach(composeWindow)) {
                         DesktopWindowBackdrop.apply()
+                        DesktopStartupDiagnostics.record(DesktopStartupDiagnostics.Milestone.WINDOW_CREATED)
                         return@LaunchedEffect
                     }
                     delay(50)
                 }
                 DesktopWindowBackdrop.apply()
+                DesktopStartupDiagnostics.record(DesktopStartupDiagnostics.Milestone.WINDOW_CREATED)
             } else {
                 // Preserve the established Linux sizing path, including its startup correction.
                 val transform = composeWindow.graphicsConfiguration.defaultTransform
@@ -168,6 +176,7 @@ private fun desktopMain(welcomeLaunch: DesktopWelcomeOnboarding.Launch) = applic
                     (openingSize.width.value * transform.scaleX).roundToInt(),
                     (openingSize.height.value * transform.scaleY).roundToInt(),
                 )
+                DesktopStartupDiagnostics.record(DesktopStartupDiagnostics.Milestone.WINDOW_CREATED)
             }
         }
         // Apply app-wide UI scale inside Compose, preserving native window frame sizing

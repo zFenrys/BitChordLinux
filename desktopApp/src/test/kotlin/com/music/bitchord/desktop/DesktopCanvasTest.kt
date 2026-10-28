@@ -110,6 +110,15 @@ class DesktopCanvasTest {
     }
 
     @Test
+    fun `Apple video falls back from wide to square when no frames are decoded`() {
+        val wide = "https://mvod.itunes.apple.com/wide.m3u8"
+        val square = "https://mvod.itunes.apple.com/square.m3u8"
+        assertEquals(listOf(wide, square), canvasSourceOrder(wide, square, wide))
+        assertEquals(listOf(square, wide), canvasSourceOrder(wide, square, square))
+        assertEquals(listOf(wide), canvasSourceOrder(wide, null, wide))
+    }
+
+    @Test
     fun `a hit whose title carries its feature credit still matches`() {
         // YouTube Music and Apple both title this one with the credit, which is why it matches;
         // the provider was throwing before it ever got here.
@@ -135,6 +144,40 @@ class DesktopCanvasTest {
             half.removeSuffix(" GB").replace(',', '.').toDouble(),
             0.0001,
         )
+    }
+
+    @Test
+    fun `motion chooses AVC stream nearest to the render target`() {
+        val master = "https://mvod.itunes.apple.com/x/master.m3u8"
+        val manifest = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=9000000,RESOLUTION=3840x2160,CODECS="hvc1.1.6.L120.90"
+            hevc.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360,CODECS="avc1.4d401e"
+            small.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1280x720,CODECS="avc1.4d401f"
+            target.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=1920x1080,CODECS="avc1.4d4028"
+            large.m3u8
+        """.trimIndent()
+        assertEquals("https://mvod.itunes.apple.com/x/target.m3u8", selectCanvasVariant(master, manifest, 960))
+        assertEquals("https://mvod.itunes.apple.com/x/small.m3u8", selectCanvasVariant(master, manifest, 540))
+        assertEquals("https://mvod.itunes.apple.com/x/large.m3u8", selectCanvasVariant(master, manifest, 4096))
+    }
+
+    @Test
+    fun `motion rejects media playlists and unsafe rendition schemes`() {
+        val master = "https://mvod.itunes.apple.com/x/master.m3u8"
+        assertNull(selectCanvasVariant(master, "#EXTM3U\n#EXTINF:2,\nsegment.ts", 540))
+        assertNull(selectCanvasVariant(master, "#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=1280x720\nfile:///private", 540))
+    }
+
+    @Test
+    fun `Spotify motion is blocked at the shared fullscreen player boundary`() {
+        val spotify = DesktopCanvasArtwork("https://example.invalid/canvas.mp4", source = DesktopCanvasSource.SPOTIFY)
+        val general = DesktopCanvasArtwork("https://example.invalid/cover.mp4", source = DesktopCanvasSource.OTHER)
+        assertNull(spotify.toSharedPlayerCanvas())
+        assertTrue(general.toSharedPlayerCanvas() != null)
     }
 
     private fun field(number: Int, value: String): ByteArray {

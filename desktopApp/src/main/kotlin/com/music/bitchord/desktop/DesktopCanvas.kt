@@ -75,11 +75,10 @@ data class DesktopCanvasArtwork(
 }
 
 /**
- * The four providers, asked in turn until one answers with a clip that is really this track's.
+ * The three general-purpose providers, asked in turn until one answers with a clip that is really this track's.
  *
- * Apple and Tidal first because their clips are square and belong to the release; the community
- * index next because it is the only one covering back catalogue; Spotify last because it is the
- * one that needs a credential.
+ * General-purpose motion artwork for the main player uses Apple, Tidal and community sources.
+ * Spotify Canvas is reserved for the Now Playing Details card via lookupSpotify().
  */
 object DesktopCanvasClient {
 
@@ -127,14 +126,46 @@ object DesktopCanvasClient {
                 { DesktopAppleMusicCanvas.search(title, artist, album) },
                 { DesktopTidalCanvas.search(title, artist, album) },
                 { DesktopCommunityCanvas.search(title, artist, album) },
-                { DesktopSpotifyCanvas.search(title, artist, album) },
-            ) { it.matches(title, artist, album) }
+            ) { it.source != DesktopCanvasSource.SPOTIFY && it.matches(title, artist, album) }
+        }
+    }
+
+    /**
+     * Spotify-only Canvas for the Now Playing Details card.
+     *
+     * Kept separate from the main player's four-provider cache: a square Apple/Tidal
+     * motion cover must never be mistaken for a Spotify Canvas. No Spotify session
+     * means no request, and a missing clip simply leaves the static album artwork.
+     */
+    suspend fun lookupSpotify(song: Song): DesktopCanvasArtwork? {
+        if (DesktopSpotifyToken.cookie().isBlank()) return null
+        if (song.videoId.isBlank() && (song.localUri != null || song.localPath != null)) return null
+        val title = song.title.cleanedForCanvas()
+        val artist = song.artist.cleanedForCanvas()
+        if (title.isBlank() || artist.isBlank()) return null
+        val album = song.albumName
+        // Spotify remains in a separate cache namespace and never supplies fullscreen artwork.
+        // Only cache successful Spotify results. Authentication and Canvas endpoints are
+        // external, so a timeout/401/temporary miss must not poison the next retry.
+        val key = "spotify|song|${song.videoId}|${title}|${artist}"
+        return gate.withLock {
+            synchronized(cache) { cache[key]?.artwork }?.let { return@withLock it }
+            val found = withContext(Dispatchers.IO) {
+                runCatching { DesktopSpotifyCanvas.search(title, artist, album) }
+                    .onFailure { DesktopTrackLog.log("canvas: Spotify lookup failed (${it.message})") }
+                    .getOrNull()
+            }?.takeIf {
+                it.source == DesktopCanvasSource.SPOTIFY && it.matches(title, artist, null)
+            }
+            if (found != null) synchronized(cache) { cache[key] = Entry(found, album != null) }
+            found
         }
     }
 
     /** A canvas already worked out for [song], without going near the network. */
     fun cached(song: Song): DesktopCanvasArtwork? =
         synchronized(cache) { cache["song|${song.videoId}"]?.artwork }
+            ?.takeUnless { it.source == DesktopCanvasSource.SPOTIFY }
 
     /**
      * The canvas for a release, for an album page's header.
@@ -151,8 +182,7 @@ object DesktopCanvasClient {
                 { DesktopAppleMusicCanvas.searchAlbum(name, credit) },
                 { DesktopTidalCanvas.searchAlbum(name, credit) },
                 { DesktopCommunityCanvas.searchAlbum(name, credit) },
-                { DesktopSpotifyCanvas.searchAlbum(name, credit) },
-            ) { it.matches(name, credit, name) }
+            ) { it.source != DesktopCanvasSource.SPOTIFY && it.matches(name, credit, name) }
         }
     }
 
@@ -240,6 +270,12 @@ internal object DesktopCanvasCache {
     }
 }
 
+/** A successful open can still decode zero frames. Prioritise a second rendition on retry. */
+internal fun canvasSourceOrder(primary: String, fallback: String?, preferred: String = primary): List<String> {
+    val candidates = listOfNotNull(primary, fallback).distinct()
+    return if (preferred == fallback && fallback != primary) candidates.reversed() else candidates
+}
+
 /** The motion artwork, drawn as frames rather than played by a native child. */
 @Composable
 fun DesktopCanvasView(
@@ -249,40 +285,49 @@ fun DesktopCanvasView(
     contentScale: ContentScale = ContentScale.Crop,
     /** Tried once if [url] will not decode — the Apple provider's second rendition of the clip. */
     fallbackUrl: String? = null,
+    maxEdge: Int = DesktopCanvasDecoder.MAX_EDGE,
+    /** Off for clips that are not the playing track's, so the player's backdrop is left alone. */
+    publishBackdrop: Boolean = true,
 ) {
     var frame by remember(url) { mutableStateOf<ImageBitmap?>(null) }
 
-    LaunchedEffect(url, fallbackUrl, isPlaying) {
+    LaunchedEffect(url, fallbackUrl, isPlaying, maxEdge, publishBackdrop) {
         if (!isPlaying) return@LaunchedEffect
+        var retryDelayMs = 1_000L
+        var preferredSource = url
         // Round and round until the track ends or the player is closed. A canvas is a few seconds
         // long, so one pass through it is not the feature — and the decoder cannot be relied on to
         // rewind itself: its own seek does not take on an HLS manifest, which is what Apple serves,
         // and the clip then stopped dead on its last frame for the rest of the song.
         while (isActive) {
-            val decoder = DesktopCanvasDecoder()
-            val opened = withContext(Dispatchers.IO) {
-                var last: Result<Unit> = Result.failure(IllegalStateException("the clip could not be fetched"))
-                for (candidate in listOfNotNull(url, fallbackUrl)) {
-                    // A manifest names its segments relative to the host it came from, so saving the
-                    // playlist to disk and opening that leaves FFmpeg with nothing it can resolve.
-                    // Apple's motion artwork is HLS, which is how "could not open the clip" happened.
-                    val source = if (isManifest(candidate)) {
-                        candidate
-                    } else {
-                        DesktopCanvasCache.fileFor(candidate)?.toAbsolutePath()?.toString() ?: continue
-                    }
-                    last = decoder.open(source)
-                    if (last.isSuccess) break
-                }
-                last
-            }
-            if (opened.isFailure) {
-                DesktopTrackLog.log("canvas: ${opened.exceptionOrNull()?.message}")
-                withContext(Dispatchers.IO) { decoder.close() }
-                return@LaunchedEffect
-            }
+            val decoder = DesktopCanvasDecoder(maxEdge)
             var shown = 0
+            var openedSource: String? = null
             try {
+                val opened = withContext(Dispatchers.IO) {
+                    var last: Result<Unit> = Result.failure(IllegalStateException("the clip could not be fetched"))
+                    for (candidate in canvasSourceOrder(url, fallbackUrl, preferredSource)) {
+                        val source = if (isManifest(candidate)) {
+                            candidate
+                        } else {
+                            DesktopCanvasCache.fileFor(candidate)?.toAbsolutePath()?.toString() ?: continue
+                        }
+                        last = decoder.open(source)
+                        if (last.isSuccess) {
+                            openedSource = candidate
+                            break
+                        }
+                    }
+                    last
+                }
+                if (opened.isFailure) {
+                    DesktopTrackLog.log(
+                        "canvas: video open failed, retrying in ${retryDelayMs}ms (${opened.exceptionOrNull()?.message})",
+                    )
+                    delay(retryDelayMs)
+                    retryDelayMs = (retryDelayMs * 2).coerceAtMost(10_000L)
+                    continue
+                }
                 val pixels = ByteArray(decoder.width * decoder.height * 4)
                 val info = ImageInfo.makeN32(decoder.width, decoder.height, ColorAlphaType.OPAQUE)
                 while (isActive) {
@@ -297,24 +342,35 @@ fun DesktopCanvasView(
                     // The backdrop reads the first frame and holds it: re-meshing every frame would
                     // be a full resample twenty-five times a second for a wash nobody is watching
                     // closely, and the clip's palette does not change much across it anyway.
-                    if (shown == 1) DesktopCanvasBackdrop.publish(url, next)
+                    if (shown == 1 && publishBackdrop) DesktopCanvasBackdrop.publish(url, next)
                     val spent = System.currentTimeMillis() - started
                     delay((decoder.frameIntervalMillis - spent).coerceAtLeast(0L))
                 }
             } finally {
                 withContext(NonCancellable + Dispatchers.IO) { decoder.close() }
             }
-            // A pass that drew nothing would spin: reopening cannot fix a clip that has no frames
-            // in it, and retrying immediately is a busy loop over the network.
+            // Apple HLS can intermittently yield an empty stream. Retry with a cap
+            // instead of freezing the still or spinning over network requests.
             if (shown == 0) {
-                DesktopTrackLog.log("canvas: the clip decoded no frames; not looping it")
-                return@LaunchedEffect
+                // An HLS rendition can open successfully and still yield zero decoded
+                // frames (e.g. unsupported codec). On the next pass prefer Apple's
+                // alternate square rendition rather than retrying the broken wide
+                // rendition forever.
+                preferredSource = if (openedSource == url) fallbackUrl ?: url else url
+                DesktopTrackLog.log("canvas: zero decoded frames; retrying alternate rendition in ${retryDelayMs}ms")
+                delay(retryDelayMs)
+                retryDelayMs = (retryDelayMs * 2).coerceAtMost(10_000L)
+            } else {
+                preferredSource = openedSource ?: preferredSource
+                retryDelayMs = 1_000L
+                // Reopen the rendition that actually decoded frames after HLS EOF.
+                delay(250L)
             }
         }
     }
 
-    DisposableEffect(url) {
-        onDispose { DesktopCanvasBackdrop.clear(url) }
+    DisposableEffect(url, publishBackdrop) {
+        onDispose { if (publishBackdrop) DesktopCanvasBackdrop.clear(url) }
     }
 
     // Nothing at all until the first frame: a placeholder here would flash between the still cover
