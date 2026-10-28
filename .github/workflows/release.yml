@@ -5,14 +5,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to stamp into the packages, without the leading v"
+        description: "Release version (e.g. 1.8.2); creates a draft release after successful builds"
         required: true
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -86,6 +86,69 @@ jobs:
         with:
           name: linux-artifacts
           path: dist/*
+
+  arch:
+    name: Arch / CachyOS · convert Linux DEB
+    needs: linux
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reuse the exact DEB produced by the Linux job; no second Gradle build.
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-artifacts
+          path: dist
+
+      - name: Install Arch packaging utilities
+        run: pacman -Syu --noconfirm --needed python git sudo
+
+      - name: Identify release and prepare source artifact
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-${REF_NAME#v}}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          test -f "dist/BitChord-$version-linux-amd64.deb"
+          python packaging/aur/prepare_release.py \
+            --version "$version" --deb "dist/BitChord-$version-linux-amd64.deb"
+
+      - name: Build and verify pacman package (no root builds)
+        run: |
+          set -euo pipefail
+          useradd --create-home aurbuilder
+          printf "%s\n" "aurbuilder ALL=(ALL) NOPASSWD: /usr/bin/pacman" > /etc/sudoers.d/aurbuilder
+          chmod 440 /etc/sudoers.d/aurbuilder
+          chown -R aurbuilder:aurbuilder packaging/aur
+          runuser -u aurbuilder -- bash -c '
+            set -euo pipefail
+            cd packaging/aur
+            makepkg --printsrcinfo > .SRCINFO
+            makepkg --verifysource
+            makepkg --syncdeps --noconfirm --cleanbuild
+          '
+
+      - name: Inspect and collect Arch artifact
+        run: |
+          set -euo pipefail
+          pkg=$(find packaging/aur -maxdepth 1 -name "*.pkg.tar.zst" -print -quit)
+          test -n "$pkg"
+          bsdtar -tf "$pkg" > /tmp/arch-files.txt
+          grep -Fxq "opt/bitchord-desktop-revived/bin/BitChord" /tmp/arch-files.txt
+          grep -Fxq "usr/bin/bitchord-desktop-revived" /tmp/arch-files.txt
+          grep -Fxq "usr/share/applications/bitchord-desktop-revived.desktop" /tmp/arch-files.txt
+          cp "$pkg" dist/
+          sha256sum dist/*.pkg.tar.zst
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-artifacts
+          path: dist/*.pkg.tar.zst
+          if-no-files-found: error
 
   windows:
     name: Windows · installer, msi, portable
@@ -161,9 +224,29 @@ jobs:
 
   release:
     name: Publish
-    needs: [linux, windows]
+    needs: [linux, windows, arch]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate release version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = "tag" ]; then
+            version="${REF_NAME#v}"
+          else
+            version="$INPUT_VERSION"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release version must be MAJOR.MINOR.PATCH (e.g. 1.8.2)"
+            exit 1
+          fi
+          echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
+
       - uses: actions/download-artifact@v4
         with:
           pattern: "*-artifacts"
@@ -172,13 +255,26 @@ jobs:
 
       - run: ls -lh dist
 
+      - name: Select release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="docs/releases/${RELEASE_TAG}.md"
+          if [ -f "$notes" ]; then
+            cp "$notes" "$RUNNER_TEMP/release-notes.md"
+          else
+            printf '# BitChord %s\n\nDownload the Windows, Linux, and Arch packages below.\n' "$RELEASE_TAG" > "$RUNNER_TEMP/release-notes.md"
+          fi
+          echo "RELEASE_NOTES_PATH=$RUNNER_TEMP/release-notes.md" >> "$GITHUB_ENV"
+
       - name: Draft the release
-        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: BitChord ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: BitChord ${{ env.RELEASE_TAG }}
           draft: true
+          body_path: ${{ env.RELEASE_NOTES_PATH }}
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

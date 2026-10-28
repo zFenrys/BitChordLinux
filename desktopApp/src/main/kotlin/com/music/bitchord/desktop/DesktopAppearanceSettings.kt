@@ -16,7 +16,13 @@ internal object DesktopAppearanceSettings {
 
     private val _reduceAnimation = flag(KEY_REDUCE_ANIMATION, false)
     private val _reduceDynamicBlur = flag(KEY_REDUCE_DYNAMIC_BLUR, false)
+    // Mica-style navigation is lightweight wallpaper tinting, independent of blur.
+    private val _micaSidebar = flag(KEY_MICA_SIDEBAR, DesktopSidebarMica.isSupported)
     private val _hideVolumeBar = flag(KEY_HIDE_VOLUME_BAR, false)
+    // New floating bottom player is the default. The original top player is opt-in.
+    private val _enableOldTopMusicPlayerStyle = flag(KEY_ENABLE_OLD_TOP_MUSIC_PLAYER_STYLE, false)
+    // v1.8 Explore cards remain the default; the classic v1.7 sleeve can be opted into.
+    private val _useOldExploreCards = flag(KEY_USE_OLD_EXPLORE_CARDS, false)
 
     /** Freezes the main player's gradient instead of drifting. */
     val reduceAnimation: StateFlow<Boolean> = _reduceAnimation
@@ -24,8 +30,17 @@ internal object DesktopAppearanceSettings {
     /** Swaps frosted glass for solid fills across the app. */
     val reduceDynamicBlur: StateFlow<Boolean> = _reduceDynamicBlur
 
+    /** Windows 11 wallpaper-tinted, opaque navigation material. */
+    val micaSidebar: StateFlow<Boolean> = _micaSidebar
+
     /** Removes the volume slider from the main player. */
     val hideVolumeBar: StateFlow<Boolean> = _hideVolumeBar
+
+    /** Restores the original desktop top player instead of the floating bottom dock. */
+    val enableOldTopMusicPlayerStyle: StateFlow<Boolean> = _enableOldTopMusicPlayerStyle
+
+    /** Switches Explore category artwork between current and classic v1.7 cards. */
+    val useOldExploreCards: StateFlow<Boolean> = _useOldExploreCards
 
     /** Whether the lyrics pane carries its own log console. */
 
@@ -33,7 +48,15 @@ internal object DesktopAppearanceSettings {
 
     fun setReduceDynamicBlur(value: Boolean) = write(KEY_REDUCE_DYNAMIC_BLUR, value, _reduceDynamicBlur)
 
+    fun setMicaSidebar(value: Boolean) = write(KEY_MICA_SIDEBAR, value, _micaSidebar)
+
     fun setHideVolumeBar(value: Boolean) = write(KEY_HIDE_VOLUME_BAR, value, _hideVolumeBar)
+
+    fun setEnableOldTopMusicPlayerStyle(value: Boolean) =
+        write(KEY_ENABLE_OLD_TOP_MUSIC_PLAYER_STYLE, value, _enableOldTopMusicPlayerStyle)
+
+    fun setUseOldExploreCards(value: Boolean) =
+        write(KEY_USE_OLD_EXPLORE_CARDS, value, _useOldExploreCards)
 
 
     private fun write(key: String, value: Boolean, into: MutableStateFlow<Boolean>) {
@@ -43,5 +66,8 @@ internal object DesktopAppearanceSettings {
 
     internal const val KEY_REDUCE_ANIMATION = "reduce_animation"
     internal const val KEY_REDUCE_DYNAMIC_BLUR = "reduce_dynamic_blur"
+    internal const val KEY_MICA_SIDEBAR = "mica_sidebar"
     internal const val KEY_HIDE_VOLUME_BAR = "hide_volume_bar"
+    internal const val KEY_ENABLE_OLD_TOP_MUSIC_PLAYER_STYLE = "enable_old_top_music_player_style"
+    internal const val KEY_USE_OLD_EXPLORE_CARDS = "use_old_explore_cards"
 }

@@ -1,5 +1,7 @@
 package com.music.bitchord.desktop
 
+import com.music.bitchord.ui.screens.desktopTopScrollFade
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -223,8 +226,10 @@ private fun PartyLanding(
     onCreate: () -> Unit,
     onPreview: () -> Unit,
 ) {
+    val partyLandingListState = rememberLazyListState()
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        state = partyLandingListState,
+        modifier = Modifier.fillMaxSize().desktopTopScrollFade(partyLandingListState),
         contentPadding = PaddingValues(28.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
@@ -383,13 +388,23 @@ private fun JoinConfirmation(
 
 @Composable
 private fun PartyRoom(state: DesktopListenTogether.State, activity: List<PartyActivity>, busy: Boolean, onLeave: () -> Unit) {
+    val partyDetailsScrollState = rememberLazyListState()
+    val partyMembersScrollState = rememberLazyListState()
     Row(Modifier.fillMaxSize().padding(horizontal = panelInset(24.dp), vertical = 24.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        LazyColumn(Modifier.weight(1.15f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        LazyColumn(
+            state = partyDetailsScrollState,
+            modifier = Modifier.weight(1.15f).fillMaxHeight().desktopTopScrollFade(partyDetailsScrollState),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             item { RoomHero(state) }
             item { NowPlayingCard(state) }
             item { QueueCard(state) }
         }
-        LazyColumn(Modifier.weight(.85f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        LazyColumn(
+            state = partyMembersScrollState,
+            modifier = Modifier.weight(.85f).fillMaxHeight().desktopTopScrollFade(partyMembersScrollState),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             item { MembersCard(state) }
             if (state.you?.isHost == true) item { HostControls(state) }
             if (activity.isNotEmpty()) item { ActivityCard(activity) }
@@ -574,7 +589,7 @@ private fun Stepper(label: String, enabled: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.size(32.dp).clip(CircleShape).background(DesktopCardInsetFill).clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = if (enabled) Color.White else DesktopSecondary) }
+    ) { Text(label, color = if (enabled) DesktopForeground else DesktopSecondary) }
 }
 
 @Composable
@@ -589,10 +604,10 @@ private fun PrimaryButton(
         onClick = onClick,
         enabled = enabled && !busy,
         shape = RoundedCornerShape(50),
-        colors = ButtonDefaults.buttonColors(containerColor = DesktopAccent, contentColor = Color.Black),
+        colors = ButtonDefaults.buttonColors(containerColor = DesktopAccent, contentColor = DesktopOnAccent),
         modifier = modifier.height(46.dp),
     ) {
-        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.Black)
+        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = DesktopOnAccent)
         else Text(label, fontWeight = FontWeight.SemiBold)
     }
 }

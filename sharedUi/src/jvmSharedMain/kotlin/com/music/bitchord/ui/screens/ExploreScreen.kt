@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -30,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -67,6 +70,10 @@ fun ExploreScreen(
     modifier: Modifier = Modifier,
     /** The big "Explore" heading; the desktop's pages carry none. */
     showTitle: Boolean = true,
+    /** Render each server-provided category section with its own heading. */
+    showSectionHeadings: Boolean = false,
+    /** Keep the current v1.8 card treatment by default; desktop users may opt into v1.7. */
+    useOldCards: Boolean = false,
 ) {
     PullToRefresh(
         refreshing = refreshing,
@@ -75,11 +82,13 @@ fun ExploreScreen(
         modifier = modifier,
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
+            val compactHeadings = LocalDesktopCompactHeadings.current
             val columns = moodColumns(maxWidth)
             LazyColumn(
                 state = listState,
                 contentPadding = contentPadding,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize()
+                    .then(if (compactHeadings) Modifier.desktopTopScrollFade(listState) else Modifier),
             ) {
                 if (showTitle) {
                     item {
@@ -104,13 +113,40 @@ fun ExploreScreen(
                         MessageState(state.message, actionLabel = stringResource(Res.string.retry), onAction = onRetry)
                     }
                     is UiState.Success -> {
-                        // Moods and genres read as one grid; the server's
-                        // grouping only decides the order.
-                        val rows = state.data.flatMap(MoodGenreSection::items)
-                            .distinctBy { it.browseId to it.params }
-                            .chunked(columns)
-                        items(rows, key = { row -> row.first().let { "${it.browseId}|${it.params}" } }) { row ->
-                            MoodGenreRow(row = row, columns = columns, onCategoryClick = onCategoryClick)
+                        if (showSectionHeadings) {
+                            state.data.forEach { section ->
+                                item(key = "mood-section:${section.title}") {
+                                    Text(
+                                        text = section.title,
+                                        style = if (compactHeadings) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
+                                        fontWeight = if (compactHeadings) FontWeight.Bold else FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier.padding(
+                                            start = PAGE_GUTTER,
+                                            end = PAGE_GUTTER,
+                                            top = 14.dp,
+                                            bottom = 10.dp,
+                                        ),
+                                    )
+                                }
+                                val rows = section.items
+                                    .distinctBy { it.browseId to it.params }
+                                    .chunked(columns)
+                                items(
+                                    rows,
+                                    key = { row -> "${section.title}:${row.first().browseId}|${row.first().params}" },
+                                ) { row ->
+                                    MoodGenreRow(row = row, columns = columns, onCategoryClick = onCategoryClick, useOldCards = useOldCards)
+                                }
+                            }
+                        } else {
+                            // The default Explore page keeps moods and genres in one continuous grid.
+                            val rows = state.data.flatMap(MoodGenreSection::items)
+                                .distinctBy { it.browseId to it.params }
+                                .chunked(columns)
+                            items(rows, key = { row -> row.first().let { "${it.browseId}|${it.params}" } }) { row ->
+                                MoodGenreRow(row = row, columns = columns, onCategoryClick = onCategoryClick, useOldCards = useOldCards)
+                            }
                         }
                     }
                 }
@@ -124,6 +160,7 @@ private fun MoodGenreRow(
     row: List<MoodGenre>,
     columns: Int,
     onCategoryClick: (MoodGenre) -> Unit,
+    useOldCards: Boolean,
 ) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(MOOD_SPACING),
@@ -136,6 +173,7 @@ private fun MoodGenreRow(
                 item = item,
                 onClick = { onCategoryClick(item) },
                 modifier = Modifier.weight(1f),
+                useOldCards = useOldCards,
             )
         }
         // Short rows keep their cards the size of a full row's.
@@ -144,12 +182,108 @@ private fun MoodGenreRow(
 }
 
 /**
+ * Both card designs share one Explore grid, category click behavior and artwork data.
+ * The preference only affects drawing; switching it never reloads the Explore feed.
+ */
+@Composable
+private fun MoodGenreCard(
+    item: MoodGenre,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    useOldCards: Boolean,
+) {
+    if (useOldCards) {
+        OldMoodGenreCard(item = item, onClick = onClick, modifier = modifier)
+    } else {
+        ModernMoodGenreCard(item = item, onClick = onClick, modifier = modifier)
+    }
+}
+
+/**
+ * v1.7-style Explore card: one uninterrupted colour gradient with a cropped,
+ * tilted album sleeve in the lower-right corner. The v1.8 duotone split made
+ * artwork look pasted onto a separate solid panel on desktop.
+ */
+@Composable
+private fun OldMoodGenreCard(
+    item: MoodGenre,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val color = moodColor(item.title)
+    Box(
+        modifier = modifier
+            .aspectRatio(MOOD_CARD_ASPECT)
+            .clip(MOOD_CARD_SHAPE)
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        color,
+                        color.copy(
+                            red = color.red * .68f,
+                            green = color.green * .68f,
+                            blue = color.blue * .68f,
+                        ),
+                    ),
+                ),
+            )
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            // v1.7 used an 82dp sleeve in a 100dp card. Scale that proportion
+            // with the responsive desktop card height instead of fixing dp.
+            val artworkSize = (maxHeight + 24.dp) * MOOD_ARTWORK_HEIGHT_FRACTION
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 10.dp, y = 12.dp)
+                    .size(artworkSize)
+                    .graphicsLayer { rotationZ = 16f }
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(Color.White.copy(alpha = .22f)),
+            ) {
+                item.thumbnailUrl?.let { artwork ->
+                    AsyncImage(
+                        model = artwork,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.TopStart).padding(end = 48.dp),
+        )
+    }
+}
+
+/** Original v1.7 palette, independent of fluctuating remote artwork colours. */
+private fun moodColor(title: String): Color = when ((title.hashCode() and Int.MAX_VALUE) % 8) {
+    0 -> Color(0xFFE64A19)
+    1 -> Color(0xFFEC0B65)
+    2 -> Color(0xFF8664AC)
+    3 -> Color(0xFF6B4EFF)
+    4 -> Color(0xFFBE6100)
+    5 -> Color(0xFF233C78)
+    6 -> Color(0xFF4D97E5)
+    else -> Color(0xFFAA267E)
+}
+
+/**
  * A solid stripe down the left and the category's cover filling the rest,
  * redrawn as a duotone of the stripe's colour so every card reads as one
  * tinted sleeve rather than a photo pasted onto a swatch.
  */
 @Composable
-private fun MoodGenreCard(
+private fun ModernMoodGenreCard(
     item: MoodGenre,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -257,7 +391,10 @@ private val MOOD_CARD_SHAPE = RoundedCornerShape(18.dp)
 /** Width over height; a two-column phone row lands at about 100dp tall. */
 private const val MOOD_CARD_ASPECT = 1.72f
 
-/** How much of the card the solid stripe covers before the artwork starts. */
+/** Size of the v1.7 sleeve relative to the card height (82dp / 100dp). */
+private const val MOOD_ARTWORK_HEIGHT_FRACTION = .82f
+
+/** The modern card places a solid stripe to the left of its tinted image. */
 private const val MOOD_STRIPE_FRACTION = .28f
 
 /**
@@ -303,15 +440,17 @@ fun MoodGenrePlaylistsScreen(
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
+    val compactHeadings = LocalDesktopCompactHeadings.current
     LazyColumn(
         state = listState,
         contentPadding = contentPadding,
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize()
+            .then(if (compactHeadings) Modifier.desktopTopScrollFade(listState) else Modifier),
     ) {
         item {
             Text(
                 text = title,
-                style = MaterialTheme.typography.displayLarge,
+                style = if (compactHeadings) MaterialTheme.typography.headlineLarge else MaterialTheme.typography.displayLarge,
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

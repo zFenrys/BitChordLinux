@@ -1,5 +1,7 @@
 package com.music.bitchord.desktop
 
+import com.music.bitchord.ui.screens.desktopTopScrollFade
+
 import com.music.bitchord.data.lyrics.TRANSLATION_LANGUAGES
 import com.music.bitchord.data.lyrics.translationLanguageName
 
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Icon
@@ -60,12 +63,13 @@ internal fun DesktopTranslationLanguageDialog(onDismiss: () -> Unit) {
         if (needle.isBlank()) named else named.filter { it.second.lowercase(locale).contains(needle) }
     }
 
+    val languageListState = rememberLazyListState()
     DesktopDialogPanel(onDismiss = onDismiss, maxWidth = 420) {
         Column(Modifier.fillMaxWidth().padding(horizontal = panelInset(20.dp), vertical = 18.dp)) {
             Text(
                 DesktopStrings["translation_language", "Translation language"],
                 style = MaterialTheme.typography.titleLarge,
-                color = Color.White,
+                color = DesktopForeground,
             )
             Text(
                 DesktopStrings["d_what_the_translate_button_translates_into", "What the translate button on the lyrics translates into"],
@@ -84,7 +88,9 @@ internal fun DesktopTranslationLanguageDialog(onDismiss: () -> Unit) {
         }
 
         LazyColumn(
-            Modifier.fillMaxWidth().then(desktopPanelBody(cardMax = 340.dp)).padding(top = 12.dp),
+            state = languageListState,
+            modifier = Modifier.fillMaxWidth().then(desktopPanelBody(cardMax = 340.dp))
+                .desktopTopScrollFade(languageListState).padding(top = 12.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             item {
@@ -107,7 +113,7 @@ internal fun DesktopTranslationLanguageDialog(onDismiss: () -> Unit) {
 
         Row(Modifier.fillMaxWidth().padding(horizontal = panelInset(20.dp), vertical = 14.dp)) {
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = onDismiss) { Text(DesktopStrings["done", "Done"], color = Color.White) }
+            TextButton(onClick = onDismiss) { Text(DesktopStrings["done", "Done"], color = DesktopForeground) }
         }
     }
 }
@@ -121,7 +127,7 @@ private fun LanguageRow(name: String, detail: String, selected: Boolean, onClick
             // On a page the row's text sits on the gutter, where a band would have no edge to it;
             // the tick says which is chosen.
             .background(
-                if (selected && !LocalDesktopPanelIsPage.current) Color.White.copy(alpha = 0.06f) else Color.Transparent,
+                if (selected && !LocalDesktopPanelIsPage.current) DesktopForeground.copy(alpha = 0.06f) else Color.Transparent,
             )
             .padding(horizontal = panelInset(20.dp), vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -131,7 +137,7 @@ private fun LanguageRow(name: String, detail: String, selected: Boolean, onClick
                 name,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = Color.White,
+                color = DesktopForeground,
             )
             Text(detail, style = MaterialTheme.typography.bodySmall, color = DesktopSecondary)
         }

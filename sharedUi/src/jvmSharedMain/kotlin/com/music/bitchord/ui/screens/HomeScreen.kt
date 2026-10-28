@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import com.music.bitchord.ui.components.ShelfRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -43,11 +44,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -89,6 +95,65 @@ import com.music.bitchord.ui.components.thumbnailBorder
 import com.music.bitchord.ui.components.trackColumnWidth
 import com.music.bitchord.ui.player.MeshGradientBackground
 import com.music.bitchord.ui.player.MeshPalette
+
+/** Desktop-only typography; Android keeps the original larger styles. */
+val LocalDesktopCompactHeadings = staticCompositionLocalOf { false }
+
+/** Stable edge masking for desktop scrollable content. The mask is alpha-only, independent of the
+ * foreground/background palette, and therefore looks correct in dark, light and Follow System.
+ *
+ * At the top only the bottom edge fades (there is more below); at the bottom only the top edge
+ * fades (there is more above). When both directions scroll, both edges fade. A non-scrollable
+ * list gets no mask, so static content keeps full contrast.
+ */
+fun Modifier.desktopTopScrollFade(state: LazyListState): Modifier = desktopVerticalScrollFadeWhen(
+    canScrollBackward = { state.canScrollBackward },
+    canScrollForward = { state.canScrollForward },
+)
+
+fun Modifier.desktopTopScrollFade(state: LazyGridState): Modifier = desktopVerticalScrollFadeWhen(
+    canScrollBackward = { state.canScrollBackward },
+    canScrollForward = { state.canScrollForward },
+)
+
+/** Regular ScrollState pages (dialogs, options, etc.) get exactly the same edge behavior. */
+fun Modifier.desktopTopScrollFade(state: androidx.compose.foundation.ScrollState): Modifier =
+    desktopVerticalScrollFadeWhen(
+        canScrollBackward = { state.value > 0 },
+        canScrollForward = { state.value < state.maxValue },
+    )
+
+private fun Modifier.desktopVerticalScrollFadeWhen(
+    canScrollBackward: () -> Boolean,
+    canScrollForward: () -> Boolean,
+): Modifier = graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        // Limit masks in small scrolling panels so the bands can never cover the entire viewport.
+        val topPx = minOf(34.dp.toPx(), size.height / 3f).coerceAtLeast(0f)
+        val bottomPx = minOf(54.dp.toPx(), size.height / 3f).coerceAtLeast(0f)
+        if (topPx <= 0f || bottomPx <= 0f) return@drawWithContent
+        if (canScrollBackward()) {
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color.Transparent, Color.Black),
+                    startY = 0f,
+                    endY = topPx,
+                ),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+        if (canScrollForward()) {
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color.Black, Color.Transparent),
+                    startY = size.height - bottomPx,
+                    endY = size.height,
+                ),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+    }
 
 /** How far the Listen now heading and feed sit above the shared top inset. */
 private val HOME_TITLE_LIFT = 28.dp
@@ -140,6 +205,7 @@ fun HomeScreen(
     isPlaying: Boolean = false,
 ) {
     val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
+    val compactHeadings = LocalDesktopCompactHeadings.current
 
     PullToRefresh(
         refreshing = refreshing,
@@ -149,7 +215,8 @@ fun HomeScreen(
     ) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize()
+                .then(if (compactHeadings) Modifier.desktopTopScrollFade(listState) else Modifier),
             // The heading sits higher than the other tabs' first row: pull the
             // whole feed up by [HOME_TITLE_LIFT] with it.
             contentPadding = if (title != null) {
@@ -362,7 +429,7 @@ private fun RecentSectionHeader(
         Column(Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.headlineMedium,
+                style = if (LocalDesktopCompactHeadings.current) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -493,18 +560,21 @@ fun CompactTrackRow(
  */
 @Composable
 private fun HomeTitle(title: String, modifier: Modifier = Modifier) {
-    val style = MaterialTheme.typography.displayLarge
+    val compactHeadings = LocalDesktopCompactHeadings.current
+    val style = if (compactHeadings) MaterialTheme.typography.headlineLarge else MaterialTheme.typography.displayLarge
     val logoHeight = with(LocalDensity.current) { (style.fontSize * LOGO_TO_FONT).toDp() }
     Column(modifier = modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp)) {
-        Icon(
-            painter = painterResource(Res.drawable.ic_logo),
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier
-                .padding(bottom = 14.dp)
-                .height(logoHeight)
-                .aspectRatio(LOGO_ASPECT),
-        )
+        if (!compactHeadings) {
+            Icon(
+                painter = painterResource(Res.drawable.ic_logo),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier
+                    .padding(bottom = 14.dp)
+                    .height(logoHeight)
+                    .aspectRatio(LOGO_ASPECT),
+            )
+        }
         Text(
             text = title,
             style = style,
@@ -539,7 +609,7 @@ internal fun SectionHeader(title: String, subtitle: String = "", onShowAll: (() 
         Column(Modifier.weight(1f)) {
             Text(
                 text = displayTitle,
-                style = MaterialTheme.typography.headlineMedium,
+                style = if (LocalDesktopCompactHeadings.current) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,

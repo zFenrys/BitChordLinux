@@ -3,8 +3,10 @@ package com.music.bitchord.desktop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -23,27 +25,35 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
 
 // The look every modal card in the app shares.
 
 /** The card fill. */
-internal val DesktopCardFill = Color(0xFA1A1A1D)
+internal val DesktopCardFill: Color get() = DesktopTheme.palette.cardFill
 
 /** A block inside a card — a settings group — lifted just off the fill. */
-internal val DesktopCardInsetFill = Color(0x14FFFFFF)
+internal val DesktopCardInsetFill: Color get() = DesktopTheme.palette.cardInsetFill
 
 /** The hairline that bounds a card, and separates one row from the next. */
-internal val DesktopCardEdge = Color(0x1FFFFFFF)
+internal val DesktopCardEdge: Color get() = DesktopTheme.palette.cardEdge
 
 /** What a row reads at while the pointer is on it. */
-internal val DesktopRowHover = Color(0x1AFFFFFF)
+internal val DesktopRowHover: Color get() = DesktopTheme.palette.rowHover
 
 /** The scrim a modal card sits on. */
-internal val DesktopScrim = Color(0x8C000000)
+internal val DesktopScrim: Color get() = DesktopTheme.palette.scrim
 
 /** Card, hairline and all. */
 internal fun Modifier.desktopCard(shape: Shape): Modifier =
@@ -143,6 +153,18 @@ internal fun DesktopDialogPanel(
     popup: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    DesktopDialogPanel(onDismiss, maxWidth, popup, dismissOnEscape = false, content = content)
+}
+
+/** Opt-in dismissal keeps existing positional callers and unrelated dialog behavior unchanged. */
+@Composable
+internal fun DesktopDialogPanel(
+    onDismiss: () -> Unit,
+    maxWidth: Int,
+    popup: Boolean = false,
+    dismissOnEscape: Boolean,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     if (!popup && LocalDesktopPanelIsPage.current) {
         DesktopSettingsPageFrame(
             maxWidth = maxOf(maxWidth.dp, DesktopSettingsPageWidth),
@@ -150,35 +172,13 @@ internal fun DesktopDialogPanel(
         )
         return
     }
+    DesktopRegisterFlyout(
+        layer = DesktopFlyoutLayer.DIALOG,
+        onDismiss = if (dismissOnEscape) onDismiss else null,
+    )
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(DesktopScrim)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss,
-                ),
-        )
-        val shape = RoundedCornerShape(20.dp)
-        Box(
-            Modifier
-                .widthIn(max = maxWidth.dp)
-                .fillMaxWidth()
-                .desktopCard(shape),
-        ) {
-            // Behind the content rather than around it, so it swallows clicks on the panel's own
-            // background without eating the rows' own.
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {},
-                    ),
-            )
+        DesktopFlyoutBackdrop(onDismiss = onDismiss)
+        DesktopFlyoutCard(Modifier.widthIn(max = maxWidth.dp).fillMaxWidth()) {
             Column(
                 Modifier.padding(bottom = 4.dp),
                 verticalArrangement = Arrangement.Top,
@@ -190,4 +190,84 @@ internal fun DesktopDialogPanel(
             }
         }
     }
+}
+
+/** Audio Output's visual shell, also used by Quick Search and Keyboard Shortcuts. */
+@Composable
+internal fun DesktopFlyoutCard(
+    modifier: Modifier = Modifier,
+    onBackgroundClick: () -> Unit = {},
+    /** Quick Search uses the existing Remove Blur preference; unrelated dialogs stay opaque. */
+    frosted: Boolean = false,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(20.dp)
+    val decoration = if (frosted) {
+        modifier.clip(shape).desktopBarGlass(shape)
+    } else {
+        modifier.desktopCard(shape)
+    }
+    Box(decoration) {
+        // A separate pointer-only sibling: clicking content cannot dismiss the backdrop or leave
+        // keyboard focus on a decorative panel that will be removed when the flyout closes.
+        Box(
+            Modifier.matchParentSize().focusProperties { canFocus = false }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onBackgroundClick,
+                ),
+        )
+        content()
+    }
+}
+
+@Composable
+internal fun DesktopFlyoutBackdrop(onDismiss: () -> Unit, blockScroll: Boolean = false) {
+    Box(
+        Modifier.fillMaxSize().background(DesktopScrim)
+            .focusProperties { canFocus = false }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            )
+            .pointerInput(blockScroll) {
+                if (blockScroll) awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Main)
+                        if (event.type == PointerEventType.Scroll) event.changes.forEach { it.consume() }
+                    }
+                }
+            },
+    )
+}
+
+/** Input and results share a focus lifetime, so a row can finish its click. */
+internal fun Modifier.desktopSearchFocus(session: DesktopSearchSession<*>): Modifier =
+    onFocusChanged { if (!it.hasFocus) session.dismissSuggestions() }.focusGroup()
+
+/** Search captures its landing as a sibling, never the subtree containing this effect. */
+@Composable
+internal fun Modifier.desktopSearchGlass(
+    haze: HazeState,
+    shape: Shape,
+    reduceBlur: Boolean,
+): Modifier {
+    val fill = DesktopSearchFill
+    val surface = if (reduceBlur) {
+        Modifier.background(fill)
+    } else {
+        // Paint underneath the effect, so an unattached/unsupported source cannot flash clear.
+        // The effect still paints its blurred sibling sources over this base.
+        Modifier.background(fill).hazeEffect(state = haze) {
+            blurEnabled = true
+            backgroundColor = fill
+            blurRadius = 32.dp
+            tints = listOf(HazeTint(fill.copy(alpha = 0.82f)))
+            fallbackTint = HazeTint(fill)
+            noiseFactor = 0.02f
+        }
+    }
+    return clip(shape).then(surface).border(0.5.dp, DesktopBarEdge, shape)
 }

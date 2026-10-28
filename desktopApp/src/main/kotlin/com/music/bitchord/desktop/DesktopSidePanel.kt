@@ -24,6 +24,9 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import com.music.bitchord.ui.player.LyricsPanelColors
+import com.music.bitchord.ui.player.LocalLyricsPanelColors
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +55,13 @@ internal fun DesktopSidePanelColumn(
     // Held through the exit, so the column slides out with what it had in it rather than empty.
     var shown by remember { mutableStateOf(panel) }
     if (panel != null) shown = panel
+    // Keep a fully opaque theme surface behind the lyrics/queue crossfade too.
+    // This prevents the page backdrop from showing through between animated panels.
+    val panelFill = if ((panel ?: shown) == DesktopSidePanel.LYRICS) {
+        DesktopTheme.palette.lyricsSurface
+    } else {
+        DesktopTheme.palette.sidebarSurface
+    }
     AnimatedVisibility(
         visible = panel != null,
         enter = expandHorizontally(tween(SLIDE_MS, easing = FastOutSlowInEasing), expandFrom = Alignment.Start) +
@@ -59,19 +69,20 @@ internal fun DesktopSidePanelColumn(
         exit = shrinkHorizontally(tween(SLIDE_MS, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start) +
             fadeOut(tween(SLIDE_MS / 2)),
     ) {
-        Row(Modifier.width(SIDE_PANEL_WIDTH).fillMaxHeight()) {
+        Row(Modifier.width(SIDE_PANEL_WIDTH).fillMaxHeight().background(panelFill)) {
             Box(Modifier.width(1.dp).fillMaxHeight().background(DesktopDivider))
             Crossfade(
                 targetState = shown ?: return@Row,
                 animationSpec = tween(CROSSFADE_MS),
                 label = "sidePanel",
             ) { which ->
-                Box(Modifier.fillMaxSize()) {
-                    // The lyrics stand on the window itself, as in Apple Music; the queue is a list
-                    // and takes the sidebar's glass.
-                    if (which == DesktopSidePanel.QUEUE) {
-                        Box(Modifier.fillMaxSize().desktopChromeGlass())
-                    }
+                Box(
+                    Modifier.fillMaxSize().background(
+                        if (which == DesktopSidePanel.LYRICS) DesktopTheme.palette.lyricsSurface
+                        else DesktopTheme.palette.sidebarSurface,
+                    ),
+                ) {
+                    // Both lyrics and queue use solid, theme-aware fills with no Haze overlay.
                     Column(Modifier.fillMaxSize()) {
                         Row(
                             modifier = Modifier
@@ -84,7 +95,7 @@ internal fun DesktopSidePanelColumn(
                             // need a name over them.
                             Text(
                                 text = if (which == DesktopSidePanel.LYRICS) DesktopStrings["lyrics", "Lyrics"] else "",
-                                color = Color.White,
+                                color = DesktopForeground,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.weight(1f),
@@ -108,7 +119,18 @@ internal fun DesktopSidePanelColumn(
                                     bottom = 14.dp,
                                 ),
                         ) {
-                            content(which)
+                            if (which == DesktopSidePanel.LYRICS && DesktopTheme.isLight) {
+                                CompositionLocalProvider(
+                                    LocalLyricsPanelColors provides LyricsPanelColors(
+                                        primary = Color(0xFF1B2230),
+                                        secondary = Color(0xFF596272),
+                                        inactive = Color(0xFF3E485A),
+                                        iconSurface = Color(0xFF243044),
+                                        selection = Color(0xFF1C273B),
+                                        isLight = true,
+                                    ),
+                                ) { content(which) }
+                            } else content(which)
                         }
                     }
                 }

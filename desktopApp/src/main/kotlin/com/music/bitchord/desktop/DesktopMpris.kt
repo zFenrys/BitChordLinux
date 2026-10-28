@@ -115,6 +115,7 @@ interface MprisPlayer : DBusInterface {
 
 /** Publishes the desktop player's state through the standard Linux MPRIS session-bus interfaces. */
 internal class DesktopMprisController(
+    private val onRaise: () -> Unit,
     private val onPlay: () -> Unit,
     private val onPause: () -> Unit,
     private val onPlayPause: () -> Unit,
@@ -245,7 +246,7 @@ internal class DesktopMprisController(
     private fun allProperties(interfaceName: String): Map<String, Variant<*>> = when (interfaceName) {
         MPRIS_ROOT_INTERFACE -> linkedMapOf(
             "CanQuit" to variant(false),
-            "CanRaise" to variant(false),
+            "CanRaise" to variant(true),
             "HasTrackList" to variant(false),
             "Identity" to variant("BitChord"),
             "DesktopEntry" to variant("bitchord"),
@@ -331,7 +332,7 @@ internal class DesktopMprisController(
         Properties {
         override fun getObjectPath(): String = MPRIS_OBJECT_PATH
 
-        override fun Raise() = Unit
+        override fun Raise() = controller.onRaise()
 
         override fun Quit() = Unit
 
