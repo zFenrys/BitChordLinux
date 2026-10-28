@@ -28,7 +28,7 @@ val targetOs: String = (providers.gradleProperty("bitchord.target").orNull ?: wh
 // including Linux AppImage builds that never package a Windows installer.
 // Preserve the original label for the app and artifacts; use the project's
 // default major/minor only for installer metadata when the prefix is unusable.
-val desktopVersionCode = 30
+val desktopVersionCode = 31
 val numericPackagePrefix = appVersion.substringBefore('-')
 val requestedMajorMinor = Regex("""^(\d+)\.(\d+)(?:\.\d+)*$""")
     .matchEntire(numericPackagePrefix)
