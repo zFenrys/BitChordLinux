@@ -32,7 +32,7 @@ internal object DesktopUpdateChecker {
     internal enum class PackagePlatform { WINDOWS_X64, LINUX_X64, ARCH_X64, UNSUPPORTED }
 
     private const val LATEST_RELEASE_URL =
-        "https://api.github.com/repos/Bntagaaa/BitChord-Desktop-Revived/releases/latest"
+        "https://api.github.com/repos/zFenrys/BitChordLinux/releases/latest"
 
     val currentVersion: String = System.getProperty("bitchord.version") ?: "1.8-beta1"
 
@@ -82,7 +82,7 @@ internal object DesktopUpdateChecker {
     suspend fun check(): UpdateInfo? = runCatching {
         val response = http.get(LATEST_RELEASE_URL) {
             header("Accept", "application/vnd.github+json")
-            header("User-Agent", "BitChord-Desktop-Revived-updater")
+            header("User-Agent", "BitChordLinux-updater")
         }
         if (!response.status.isSuccess()) return@runCatching null
         val release = json.parseToJsonElement(response.bodyAsText()) as? JsonObject

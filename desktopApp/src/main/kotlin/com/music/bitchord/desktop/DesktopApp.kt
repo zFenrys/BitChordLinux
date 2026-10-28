@@ -566,22 +566,7 @@ internal fun BitChordDesktopApp(welcomeLaunch: DesktopWelcomeOnboarding.Launch) 
             onDismissRequest = { availableUpdate = null },
             title = { Text("Update available") },
             text = {
-                Column(modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                    Text("BitChord Desktop Revived ${update.version} is available. You have ${DesktopUpdateChecker.currentVersion}.")
-                    update.notes?.takeIf { it.isNotBlank() }?.let { notes ->
-                        Spacer(Modifier.height(12.dp))
-                        Text(notes)
-                    }
-                    if (DesktopUpdateChecker.packagePlatform == DesktopUpdateChecker.PackagePlatform.ARCH_X64) {
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            if (update.downloadUrl == null)
-                                "Arch/CachyOS: no native package is attached to this release yet. Check the release page and use the AUR or pacman when available. Do not install the Debian package."
-                            else
-                                "Arch/CachyOS: the native pacman package will open in your browser. Installation remains manual; use your existing package manager to avoid duplicate installations.",
-                        )
-                    }
-                }
+                Text("BitChord Linux ${update.version} is available. You have ${DesktopUpdateChecker.currentVersion}.")
             },
             confirmButton = {
                 TextButton(onClick = {
