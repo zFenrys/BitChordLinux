@@ -238,11 +238,11 @@ internal class DesktopStatusNotifierController(
     ) : StatusNotifierItem, Properties {
         override fun getObjectPath(): String = SNI_OBJECT_PATH
 
-        /** Left click: bring the player up. */
-        override fun Activate(x: Int, y: Int) = owner.onActivate()
+        /** Left click: play or pause. */
+        override fun Activate(x: Int, y: Int) = owner.onPlayPause()
 
-        /** Middle click: the one verb worth having without opening anything. */
-        override fun SecondaryActivate(x: Int, y: Int) = owner.onPlayPause()
+        /** Middle click: bring the player up. */
+        override fun SecondaryActivate(x: Int, y: Int) = owner.onActivate()
 
         /**
          * Right click, which a host that honours the advertised `Menu` never sends — it opens the
