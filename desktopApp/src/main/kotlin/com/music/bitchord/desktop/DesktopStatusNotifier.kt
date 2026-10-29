@@ -12,18 +12,26 @@ import org.freedesktop.dbus.annotations.Position
 import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBusInterface
+import org.freedesktop.dbus.messages.DBusSignal
 import com.music.bitchord.desktop.tray.DBusMenu
 import org.freedesktop.dbus.interfaces.Properties
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import javax.imageio.ImageIO
 
 /** A tray icon, on the protocol this desktop actually speaks. */
 private const val SNI_INTERFACE = "org.kde.StatusNotifierItem"
 private const val SNI_OBJECT_PATH = "/StatusNotifierItem"
 private const val SNI_WATCHER_NAME = "org.kde.StatusNotifierWatcher"
 private const val SNI_WATCHER_PATH = "/StatusNotifierWatcher"
+
+/** Icone di stato, in `src/main/resources/icons/`. */
+private const val ICON_PLAY_RESOURCE = "/icons/icon_play.png"
+private const val ICON_PAUSE_RESOURCE = "/icons/icon_pause.png"
 
 @DBusInterfaceName(SNI_WATCHER_NAME)
 interface StatusNotifierWatcher : DBusInterface {
@@ -43,6 +51,12 @@ interface StatusNotifierItem : DBusInterface {
     fun SecondaryActivate(x: Int, y: Int)
     fun ContextMenu(x: Int, y: Int)
     fun Scroll(delta: Int, orientation: String)
+
+    /** Dice all'host di rileggere `IconPixmap`: molti host ignorano `PropertiesChanged`. */
+    class NewIcon(path: String) : DBusSignal(path)
+
+    /** Dice all'host di rileggere `ToolTip`. */
+    class NewToolTip(path: String) : DBusSignal(path)
 }
 
 /** Publishes the tray icon and its menu, and keeps both in step with playback. */
@@ -65,8 +79,14 @@ internal class DesktopStatusNotifierController(
     private var nowPlaying: String? = null
     private var playing = false
 
-    /** The app's own logo, rendered once — see [setIcon]. */
+    /** The app's own logo, rendered once — see [setIcon]. Fallback se i PNG di stato mancano. */
     private var iconPixmaps: List<TrayPixmap> = emptyList()
+
+    /** L'icona mostrata mentre suona. */
+    private val playPixmaps: List<TrayPixmap> by lazy { loadPngPixmaps(ICON_PLAY_RESOURCE) }
+
+    /** L'icona mostrata in pausa. */
+    private val pausePixmaps: List<TrayPixmap> by lazy { loadPngPixmaps(ICON_PAUSE_RESOURCE) }
 
     /** Hands the tray the application's own artwork. */
     fun setIcon(svg: ByteArray) {
@@ -170,6 +190,10 @@ internal class DesktopStatusNotifierController(
         publishProperties()
     }
 
+    /**
+     * Pubblica le proprietà aggiornate e manda i segnali `NewIcon` / `NewToolTip`: Plasma e gli altri
+     * host aggiornano l'icona solo in risposta a questi, non a `PropertiesChanged`.
+     */
     private fun publishProperties() {
         val bus = synchronized(lock) { connection } ?: return
         val runner = synchronized(lock) { worker } ?: return
@@ -183,6 +207,8 @@ internal class DesktopStatusNotifierController(
                         emptyList(),
                     ),
                 )
+                bus.sendMessage(StatusNotifierItem.NewIcon(SNI_OBJECT_PATH))
+                bus.sendMessage(StatusNotifierItem.NewToolTip(SNI_OBJECT_PATH))
             }.onFailure { DesktopTrackLog.log("tray update failed: ${it.message}") }
         }
     }
@@ -204,26 +230,37 @@ internal class DesktopStatusNotifierController(
         }
     }
 
-    private fun icons(): List<TrayPixmap> = synchronized(lock) { iconPixmaps }
+    /**
+     * L'icona giusta per lo stato corrente: play mentre suona, pause altrimenti. Se i PNG non si sono
+     * caricati, ripiega sul logo SVG di [setIcon].
+     */
+    private fun icons(): List<TrayPixmap> {
+        val isPlaying = synchronized(lock) { playing }
+        val status = if (isPlaying) playPixmaps else pausePixmaps
+        return status.ifEmpty { synchronized(lock) { iconPixmaps } }
+    }
 
     private fun tooltipTitle(): String = synchronized(lock) { nowPlaying } ?: "BitChord"
 
-    private fun itemProperties(): Map<String, Variant<*>> = mapOf(
-        "Category" to Variant("ApplicationStatus"),
-        "Id" to Variant("bitchord"),
-        "Title" to Variant("BitChord"),
-        "Status" to Variant("Active"),
-        // The logo itself when it has been rendered, and a themed name as the fallback for a host
-        // that ignores pixmaps.
-        "IconName" to Variant(if (icons().isEmpty()) "multimedia-player" else ""),
-        "IconPixmap" to Variant(icons(), "a(iiay)"),
-        "ToolTip" to Variant(
-            ToolTip("", icons(), "BitChord", tooltipTitle()),
-        ),
-        // Where the host reads the menu from.
-        "Menu" to Variant(DBusPath(DesktopTrayMenu.OBJECT_PATH), "o"),
-        "ItemIsMenu" to Variant(false),
-    )
+    private fun itemProperties(): Map<String, Variant<*>> {
+        val pixmaps = icons()
+        return mapOf(
+            "Category" to Variant("ApplicationStatus"),
+            "Id" to Variant("bitchord"),
+            "Title" to Variant("BitChord"),
+            "Status" to Variant("Active"),
+            // The status icon itself when it has been loaded, and a themed name as the fallback for
+            // a host that ignores pixmaps.
+            "IconName" to Variant(if (pixmaps.isEmpty()) "multimedia-player" else ""),
+            "IconPixmap" to Variant(pixmaps, "a(iiay)"),
+            "ToolTip" to Variant(
+                ToolTip("", pixmaps, "BitChord", tooltipTitle()),
+            ),
+            // Where the host reads the menu from.
+            "Menu" to Variant(DBusPath(DesktopTrayMenu.OBJECT_PATH), "o"),
+            "ItemIsMenu" to Variant(false),
+        )
+    }
 
     /** `(sa(iiay)ss)` — icon name, pixmaps, title, description. */
     class ToolTip(
@@ -264,13 +301,12 @@ internal class DesktopStatusNotifierController(
 
 }
 
-/** The logo, rasterised at [size] and packed the way the protocol asks for it. */
 /** The size Windows draws a tray icon at; AWT scales from it if it must. */
 private const val AWT_ICON_SIZE = 32
 
 /** The same pixels AWT wants, which counts them the other way round. */
-private fun TrayPixmap.toImage(): java.awt.image.BufferedImage {
-    val image = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+private fun TrayPixmap.toImage(): BufferedImage {
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
     for (y in 0 until height) {
         for (x in 0 until width) {
             val at = (y * width + x) * 4
@@ -282,6 +318,52 @@ private fun TrayPixmap.toImage(): java.awt.image.BufferedImage {
         }
     }
     return image
+}
+
+/**
+ * Un PNG delle risorse, scalato a ogni dimensione di [ICON_SIZES] e impacchettato come lo vuole il
+ * protocollo (ARGB, un byte per canale). Lista vuota se la risorsa manca o non si legge.
+ */
+private fun loadPngPixmaps(resource: String): List<TrayPixmap> {
+    val pixmaps = runCatching {
+        val source = DesktopStatusNotifierController::class.java.getResourceAsStream(resource)
+            ?.use { ImageIO.read(it) }
+            ?: return@runCatching emptyList<TrayPixmap>()
+        ICON_SIZES.map { size ->
+            val scaled = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
+            val graphics = scaled.createGraphics()
+            try {
+                graphics.setRenderingHint(
+                    RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_BICUBIC,
+                )
+                graphics.setRenderingHint(
+                    RenderingHints.KEY_RENDERING,
+                    RenderingHints.VALUE_RENDER_QUALITY,
+                )
+                graphics.drawImage(source, 0, 0, size, size, null)
+            } finally {
+                graphics.dispose()
+            }
+            val argb = ByteArray(size * size * 4)
+            for (y in 0 until size) {
+                for (x in 0 until size) {
+                    val pixel = scaled.getRGB(x, y)
+                    val at = (y * size + x) * 4
+                    argb[at] = (pixel ushr 24).toByte()
+                    argb[at + 1] = (pixel ushr 16).toByte()
+                    argb[at + 2] = (pixel ushr 8).toByte()
+                    argb[at + 3] = pixel.toByte()
+                }
+            }
+            TrayPixmap(size, size, argb)
+        }
+    }.getOrElse { failure ->
+        DesktopTrackLog.log("tray icon $resource failed: ${failure.message}")
+        emptyList()
+    }
+    if (pixmaps.isEmpty()) DesktopTrackLog.log("tray icon $resource not loaded")
+    return pixmaps
 }
 
 private fun renderSvg(svg: ByteArray, size: Int): TrayPixmap? = runCatching {
