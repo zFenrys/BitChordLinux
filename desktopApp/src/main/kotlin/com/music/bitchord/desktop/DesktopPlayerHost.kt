@@ -57,12 +57,35 @@ internal object DesktopPlayerHost : PlayerHost {
 
     override val settings: DesktopPlayerSettings = DesktopPlayerSettings
 
-    // Both the main fullscreen path and the cache reject Spotify Canvas.
+    var mixViewOpen: (Boolean) -> Unit = {}
+    override fun onMixViewOpen(open: Boolean) = mixViewOpen(open)
+    val videoClock get() = DesktopMusicVideo.clock
+    var videoSpeed: Float
+        get() = DesktopMusicVideo.speed
+        set(value) { DesktopMusicVideo.speed = value }
+    override val musicVideoSupported = true
+    override val musicVideoEnabled = DesktopVideoBeta.enabled
+    override val musicVideoFullscreen = DesktopWindowMode.fullScreen
+    override fun setMusicVideoFullscreen(fullscreen: Boolean) {
+        if (fullscreen != DesktopWindowMode.fullScreen.value) DesktopWindowMode.toggle()
+    }
+    override val musicVideoAspect = DesktopMusicVideo.aspect
+    override val musicVideoQuality = DesktopMusicVideo.quality
+    override fun setMusicVideoQuality(height: Int?) { DesktopMusicVideo.setQuality(height) }
+    @Composable
+    override fun MusicVideo(videoId: String, fit: Boolean, onRenderedChanged: (Boolean) -> Unit, modifier: Modifier) {
+        DesktopMusicVideoSurface(videoId, fit, onRenderedChanged, modifier)
+    }
+
     override fun cachedCanvas(song: Song): CanvasArtwork? =
-        DesktopCanvasClient.cached(song).toSharedPlayerCanvas()
+        DesktopCanvasClient.cached(song)
+            ?.takeUnless { it.source == DesktopCanvasSource.SPOTIFY }
+            ?.toShared()
 
     override suspend fun canvasFor(song: Song): CanvasArtwork? =
-        withContext(Dispatchers.IO) { DesktopCanvasClient.lookup(song) }.toSharedPlayerCanvas()
+        withContext(Dispatchers.IO) { DesktopCanvasClient.lookup(song) }
+            ?.takeUnless { it.source == DesktopCanvasSource.SPOTIFY }
+            ?.toShared()
 
     @Composable
     override fun CanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) = DesktopCanvasVideo(spec, modifier)
@@ -207,12 +230,15 @@ internal object DesktopPlayerSettings : PlayerSettingsSource {
     override val meteredConnection = MutableStateFlow<Boolean?>(false)
     override val preferUsbDac = MutableStateFlow(false)
     override val prioritizeSpotifyCanvas = MutableStateFlow(false)
-    override val reduceAnimation = MutableStateFlow(false)
-    override val reduceDynamicBlur = MutableStateFlow(false)
+    override val reduceAnimation = DesktopAppearanceSettings.reduceAnimation
+    override val reduceDynamicBlur = DesktopAppearanceSettings.reduceDynamicBlur
     override val showNerdStats = MutableStateFlow(false)
     override val smartAnalysis = MutableStateFlow(SmartAnalysis())
     override val smartFadeEnabled = MutableStateFlow(false)
     override val smartMixInProgress = MutableStateFlow(false)
+    override val automixDetail = MutableStateFlow<String?>(null)
+    override val smartMixView = MutableStateFlow<com.music.bitchord.data.settings.MixTransitionView?>(null)
+    override val smartMixProgress = MutableStateFlow(0f)
     override val smartMixBlend = MutableStateFlow<MixBlend?>(null)
     override val smartTransitionWindow = MutableStateFlow<TransitionWindow?>(null)
     override val spotifyCanvasAutoHide = MutableStateFlow(true)

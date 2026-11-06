@@ -11,6 +11,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -53,6 +55,8 @@ import kotlinx.coroutines.launch
 internal fun DesktopPlayerSheet(
     visible: Boolean,
     onDismiss: () -> Unit,
+    dragToDismiss: Boolean = true,
+    onOpenPip: (() -> Unit)? = null,
     content: @Composable BoxScope.(windowWidth: Dp, windowHeight: Dp) -> Unit,
 ) {
     // Mounted while it animates out, so the slide down is seen.
@@ -69,7 +73,8 @@ internal fun DesktopPlayerSheet(
 
         LaunchedEffect(visible) {
             if (visible) {
-                offset.animateTo(0f, tween(SHEET_OPEN_MS, easing = FastOutSlowInEasing))
+                if (dragToDismiss) offset.animateTo(0f, tween(SHEET_OPEN_MS, easing = FastOutSlowInEasing))
+                else offset.snapTo(0f)
             } else {
                 offset.animateTo(heightPx, tween(SHEET_CLOSE_MS, easing = FastOutSlowInEasing))
                 mounted = false
@@ -84,6 +89,7 @@ internal fun DesktopPlayerSheet(
                 .fillMaxSize()
                 .graphicsLayer { translationY = offset.value }
                 .draggable(
+                    enabled = dragToDismiss,
                     state = dragState,
                     orientation = Orientation.Vertical,
                     onDragStopped = { velocity ->
@@ -101,17 +107,18 @@ internal fun DesktopPlayerSheet(
             val fullscreen by DesktopWindowMode.fullScreen.collectAsState()
             Box(Modifier.align(Alignment.TopStart).padding(8.dp)) {
                 DesktopToolbarButton(onClick = onDismiss, size = 32.dp) {
-                    Icon(Icons.Rounded.KeyboardArrowDown, "Minimize player", tint = DesktopForeground, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.KeyboardArrowDown, "Minimize player", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
-            Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+            Row(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+                if (onOpenPip != null) DesktopPipLauncher(onOpenPip, tint = Color.White)
                 DesktopToolbarButton(onClick = { DesktopWindowMode.toggle() }, size = 32.dp) {
-                    Icon(if (fullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, "Toggle fullscreen", tint = DesktopForeground, modifier = Modifier.size(20.dp))
+                    Icon(if (fullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, "Toggle fullscreen", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
             // The handle the landscape player draws at its top edge, made to do
             // on a click what it promises for a drag.
-            Box(
+            if (dragToDismiss) Box(
                 Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth(HANDLE_HIT_WIDTH_FRACTION)

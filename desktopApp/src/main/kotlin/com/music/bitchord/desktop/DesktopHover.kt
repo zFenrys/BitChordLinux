@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -41,9 +42,10 @@ internal fun Modifier.desktopHoverLift(
 ): Modifier = composed {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
+    val reduceAnimation by DesktopAppearanceSettings.reduceAnimation.collectAsState()
     val lift by animateFloatAsState(
-        targetValue = if (hovered) 1f else 0f,
-        animationSpec = tween(HOVER_MS),
+        targetValue = if (hovered && !reduceAnimation) 1f else 0f,
+        animationSpec = tween(if (reduceAnimation) 0 else HOVER_MS),
         label = "hoverLift",
     )
     this
@@ -76,9 +78,10 @@ private const val HOVER_MS = 140
 internal fun Modifier.desktopHoverWash(): Modifier = composed {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
+    val reduceAnimation by DesktopAppearanceSettings.reduceAnimation.collectAsState()
     val wash by animateFloatAsState(
         targetValue = if (hovered) 1f else 0f,
-        animationSpec = tween(WASH_MS),
+        animationSpec = tween(if (reduceAnimation) 0 else WASH_MS),
         label = "hoverWash",
     )
     val hoverTint = DesktopForeground
@@ -106,13 +109,14 @@ internal fun Modifier.desktopNoHoverClickable(
 ): Modifier = composed {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
+    val reduceAnimation by DesktopAppearanceSettings.reduceAnimation.collectAsState()
     val hoverBackground by animateColorAsState(
         targetValue = if (hoverHighlight && hovered) {
             DesktopForeground.copy(alpha = if (DesktopTheme.isDark) 0.09f else 0.075f)
         } else {
             Color.Transparent
         },
-        animationSpec = tween(durationMillis = 170, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = if (reduceAnimation) 0 else 170, easing = FastOutSlowInEasing),
         label = "desktop-row-hover-background",
     )
     this
@@ -123,4 +127,60 @@ internal fun Modifier.desktopNoHoverClickable(
             indication = null,
             onClick = onClick,
         )
+}
+
+/**
+ * A list row's acknowledgement of the pointer: a faint rounded wash behind the whole row.
+ *
+ * The sidebar rows answered the pointer only once selected, so pointing at an unselected one did
+ * nothing until it was clicked. Apple Music lights a row the moment the cursor enters it; this is
+ * that wash, kept lighter than the selected pill so hovering never reads as chosen. It draws its own
+ * rounded rect rather than relying on the caller's clip, so it can sit anywhere in the chain.
+ */
+@Composable
+internal fun Modifier.desktopHoverFill(
+    corner: androidx.compose.ui.unit.Dp = ROW_HOVER_CORNER,
+    alpha: Float = ROW_HOVER_ALPHA,
+): Modifier = composed {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val reduceAnimation by DesktopAppearanceSettings.reduceAnimation.collectAsState()
+    val wash by animateFloatAsState(
+        targetValue = if (hovered) 1f else 0f,
+        animationSpec = tween(if (reduceAnimation) 0 else WASH_MS),
+        label = "hoverFill",
+    )
+    // Theme-aware tint: black in light mode, white in dark mode.
+    val tint = DesktopForeground
+    this
+        .hoverable(interaction)
+        .drawBehind {
+            if (wash <= 0.01f) return@drawBehind
+            val radius = corner.toPx()
+            drawRoundRect(
+                color = tint.copy(alpha = alpha * wash),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
+            )
+        }
+}
+
+private val ROW_HOVER_CORNER = 7.dp
+private const val ROW_HOVER_ALPHA = 0.07f
+
+/**
+ * A click that reaches the whole tile but lights none of it.
+ *
+ * The words under a cover start the same thing the cover does, so they take the click. Left to the
+ * plain [clickable], though, the pointer crossing them painted a wash over the whole box — a
+ * rectangle of text answering as though it were the picture. The tiles put their highlight on the
+ * artwork with [desktopHoverFill]; this keeps the click without a second one.
+ */
+@Composable
+internal fun Modifier.desktopQuietClick(enabled: Boolean = true, onClick: () -> Unit): Modifier = composed {
+    clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+        enabled = enabled,
+        onClick = onClick,
+    )
 }
