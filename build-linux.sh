@@ -2,7 +2,7 @@
 set -e
 cd "$(dirname "$0")"
 export JAVA_HOME=/usr/lib/jvm/temurin-21-jdk
-VERSION="${1:-1.8.1}"
+VERSION="${1:-1.9.0}"
 
 if [ ! -x appimagetool.AppImage ]; then
   curl -sSL -o appimagetool.AppImage https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
