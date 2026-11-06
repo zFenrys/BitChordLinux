@@ -1,7 +1,5 @@
 package com.music.bitchord.desktop
 
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,11 +12,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import org.jsoup.Jsoup
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.text.Normalizer
-import java.util.LinkedHashMap
 import java.util.Locale
 
 /**
@@ -39,12 +35,7 @@ data class DesktopAppleArtistArt(
     val keyColor: Int?,
     val bio: String?,
     val pageUrl: String,
-) {
-    // Preserve the existing Revived artist colour API while importing the richer metadata.
-    val backgroundColor: Int get() = background
-    val textColor: Int get() = accent
-    val hasMotion: Boolean get() = !wideVideoUrl.isNullOrBlank() || !squareVideoUrl.isNullOrBlank()
-}
+)
 
 /**
  * Finds [DesktopAppleArtistArt] from an artist's name: the iTunes search turns it into an Apple
@@ -58,7 +49,7 @@ internal object DesktopAppleArtistArtRepository {
     private const val LOGO_WIDTH = 1000
 
     private class Entry(val art: DesktopAppleArtistArt?, val time: Long = System.currentTimeMillis()) {
-        fun reusable(): Boolean = art?.hasMotion == true || System.currentTimeMillis() - time < 15_000L
+        fun reusable(): Boolean = art != null || System.currentTimeMillis() - time < 5 * 60 * 1000L
     }
 
     private val cache = object : LinkedHashMap<String, Entry>(CACHE_SIZE, 0.75f, true) {
@@ -76,35 +67,18 @@ internal object DesktopAppleArtistArtRepository {
     fun isSettled(artistName: String): Boolean =
         synchronized(cache) { cache[artistName.key()]?.reusable() == true }
 
-    /**
-     * A cached motion clip is stable; a still or miss is provisional. The artist page may
-     * refresh a few times while continuing to display the current image.
-     */
-    suspend fun artFor(artistName: String, forceRefresh: Boolean = false): DesktopAppleArtistArt? {
+    suspend fun artFor(artistName: String): DesktopAppleArtistArt? {
         val key = artistName.key()
         if (key.isEmpty()) return null
-        if (!forceRefresh) {
-            synchronized(cache) { cache[key] }?.let { if (it.reusable()) return it.art }
-        }
-        val fetched = withContext(Dispatchers.IO) {
+        synchronized(cache) { cache[key] }?.let { if (it.reusable()) return it.art }
+        val entry = withContext(Dispatchers.IO) {
             runCatching { lookup(canonicalAppleArtistName(artistName), key) }
                 .onFailure { DesktopTrackLog.log("Apple artist: lookup failed for $artistName (${it.javaClass.simpleName})") }
                 .getOrNull()
-        }
-        val art = synchronized(cache) {
-            val old = cache[key]?.art
-            val fresh = fetched?.art
-            val chosen = when {
-                fresh?.hasMotion == true -> fresh
-                old?.hasMotion == true -> old
-                fresh != null -> fresh
-                else -> old
-            }
-            cache[key] = Entry(chosen)
-            chosen
-        }
+        } ?: return null
+        synchronized(cache) { cache[key] = entry }
         _updates.value++
-        return art
+        return entry.art
     }
 
     private fun lookup(name: String, key: String): Entry? {
@@ -128,27 +102,12 @@ internal object DesktopAppleArtistArtRepository {
     }
 
     private fun parse(html: String, pageUrl: String): DesktopAppleArtistArt? {
-        // Keep the fast extraction path for ordinary Apple pages. PR #70's Jsoup
-        // fallback accepts reordered attributes, single quotes and alternate markup.
         val marker = html.indexOf("id=\"serialized-server-data\"")
-        val start = if (marker >= 0) html.indexOf('>', marker) + 1 else -1
-        val end = if (start > 0) html.indexOf("</script>", start) else -1
-        val embedded = if (start > 0 && end > start) html.substring(start, end) else null
-        val serialized = embedded?.takeIf(String::isNotBlank)
-            ?: Jsoup.parse(html).selectFirst("script#serialized-server-data")?.let {
-                it.data().ifBlank { it.html() }.takeIf(String::isNotBlank)
-            }
-        if (serialized == null) {
-            DesktopTrackLog.log("Apple artist: serialized metadata script not found")
-            return null
-        }
-        val root = runCatching { json.parseToJsonElement(serialized) }
-            .onFailure { DesktopTrackLog.log("Apple artist: malformed serialized metadata") }
-            .getOrNull() ?: return null
-        val header = findHeader(root) ?: run {
-            DesktopTrackLog.log("Apple artist: artist header missing from metadata")
-            return null
-        }
+        if (marker < 0) return null
+        val start = html.indexOf('>', marker) + 1
+        val end = html.indexOf("</script>", start)
+        if (start <= 0 || end < 0) return null
+        val header = findHeader(json.parseToJsonElement(html.substring(start, end))) ?: return null
 
         val expectedId = pageUrl.substringBefore('?').substringAfterLast('/')
         val headerId = header.obj("contentDescriptor")?.obj("identifiers")?.text("storeAdamID")
@@ -157,28 +116,12 @@ internal object DesktopAppleArtistArtRepository {
         val wideStill = header.dict("wideArtwork")
         val portrait = header.dict("circleArtwork") ?: header.dict("artwork")
         val still = wideStill ?: portrait ?: header.dict("colorBackdropArtwork")
-        // The main Apple hero may omit motion despite the same artist's data elsewhere
-        // in serialized-server-data. Restore PR #70's recursive fallback, extended to
-        // fullscreen/wide 16:9 so the desktop doesn't regress to a square crop.
         val wideClip = header.dict("wideVideoArtwork")?.let {
-            it.obj("motionArtistFullscreen16x9")?.takeIf { clip -> clip.motionUrl() != null }
-                ?: it.obj("motionArtistWide16x9")?.takeIf { clip -> clip.motionUrl() != null }
-        } ?: findMotionArtist(root, "motionArtistFullscreen16x9")
-            ?: findMotionArtist(root, "motionArtistWide16x9")
+            it.obj("motionArtistFullscreen16x9") ?: it.obj("motionArtistWide16x9")
+        }
         val squareClip = header.dict("videoArtwork")?.obj("motionArtistSquare1x1")
-            ?.takeIf { it.motionUrl() != null }
-            ?: findMotionArtist(root, "motionArtistSquare1x1")
-        val wideVideo = wideClip?.motionUrl()
-        val squareVideo = squareClip?.motionUrl()
-        DesktopTrackLog.log(
-            "Apple artist: motion metadata " +
-                when {
-                    wideVideo != null && squareVideo != null -> "wide + square"
-                    wideVideo != null -> "wide"
-                    squareVideo != null -> "square"
-                    else -> "not provided"
-                },
-        )
+        val wideVideo = wideClip?.text("video")?.takeIf { it.startsWith("http") }
+        val squareVideo = squareClip?.text("video")?.takeIf { it.startsWith("http") }
 
         // A wide header wants the wide clip's own still when there is one; it matches the loop.
         val heroSource = wideClip?.obj("previewFrame")?.takeIf { wideVideo != null }
@@ -224,23 +167,6 @@ internal object DesktopAppleArtistArtRepository {
         return null
     }
 
-    /**
-     * PR #70's fallback: artist motion can be nested outside the selected hero header.
-     * Search for a motion-specific key with a usable HTTP(S) stream, ignoring still-only
-     * metadata. This also covers an artist header without a videoArtwork dictionary.
-     */
-    private fun findMotionArtist(node: JsonElement, key: String): JsonObject? = when (node) {
-        is JsonObject -> {
-            (node[key] as? JsonObject)?.takeIf { it.motionUrl() != null }
-                ?: node.values.firstNotNullOfOrNull { child -> findMotionArtist(child, key) }
-        }
-        is JsonArray -> node.firstNotNullOfOrNull { child -> findMotionArtist(child, key) }
-        else -> null
-    }
-
-    private fun JsonObject.motionUrl(): String? =
-        text("video")?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
-
     private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
 
     private fun JsonObject.dict(key: String): JsonObject? = obj(key)?.obj("dictionary")
@@ -273,56 +199,3 @@ internal object DesktopAppleArtistArtRepository {
 internal fun canonicalAppleArtistName(name: String): String = name
     .replace(Regex("""\s*(?:-\s*Topic|VEVO|\s+-\s+Official(?:\s+Channel)?)$""", RegexOption.IGNORE_CASE), "")
     .trim()
-
-@androidx.compose.runtime.Composable
-internal fun DesktopAppleArtistHero(
-    fallbackUrl: String?,
-    appleUrl: String?,
-    fallbackPx: Int,
-    modifier: androidx.compose.ui.Modifier,
-) {
-    val appleBitmap by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(
-        initialValue = null,
-        key1 = appleUrl,
-    ) {
-        value = if (appleUrl.isNullOrBlank()) null else withContext(Dispatchers.IO) {
-            DesktopArtworkCache.load(appleUrl)
-        }
-    }
-    DesktopArtwork(fallbackUrl, modifier, px = fallbackPx)
-    if (appleBitmap != null) {
-        androidx.compose.foundation.Image(
-            painter = androidx.compose.ui.graphics.painter.BitmapPainter(appleBitmap!!),
-            contentDescription = null,
-            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-            modifier = modifier,
-        )
-    }
-}
-
-@Composable
-internal fun DesktopAppleArtistLogo(
-    url: String?,
-    contentDescription: String,
-    modifier: androidx.compose.ui.Modifier,
-    fallback: @Composable () -> Unit,
-) {
-    val bitmap by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(
-        initialValue = null,
-        key1 = url,
-    ) {
-        value = if (url.isNullOrBlank()) null else withContext(Dispatchers.IO) {
-            DesktopArtworkCache.load(url)
-        }
-    }
-    if (bitmap != null) {
-        androidx.compose.foundation.Image(
-            painter = androidx.compose.ui.graphics.painter.BitmapPainter(bitmap!!),
-            contentDescription = contentDescription,
-            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-            modifier = modifier,
-        )
-    } else {
-        fallback()
-    }
-}

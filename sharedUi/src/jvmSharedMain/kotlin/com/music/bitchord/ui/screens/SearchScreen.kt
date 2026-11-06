@@ -1,5 +1,11 @@
 package com.music.bitchord.ui.screens
 
+import com.music.bitchord.ui.components.PlayingAccent
+
+
+import com.music.bitchord.ui.components.trackArtSize
+import androidx.compose.ui.layout.ContentScale
+
 import com.music.bitchord.ui.components.contextClick
 import androidx.compose.ui.unit.Dp
 import com.music.bitchord.sharedui.resources.*
@@ -96,7 +102,6 @@ import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.ArtworkHover
 import com.music.bitchord.ui.components.ArtworkHoverMode
 import com.music.bitchord.ui.components.RowMoreButton
-import com.music.bitchord.ui.components.PlayingAccent
 import com.music.bitchord.ui.components.ROW_DIVIDER_INSET
 import com.music.bitchord.ui.components.SearchField
 import com.music.bitchord.ui.components.SongRow
@@ -482,7 +487,6 @@ fun SearchScreen(
                                     isCurrent = row.song.isSameTrackAs(currentSong),
                                     isPlaying = isPlaying && row.song.isSameTrackAs(currentSong),
                                     searchPlayingStyle = true,
-                                    activeTint = PlayingAccent,
                                 )
                                 is SearchResult.Browse -> BrowseRow(
                                     item = row.item,
@@ -563,6 +567,7 @@ private fun LazyListScope.librarySearchResults(
                     isPlaying = isPlaying && song.isSameTrackAs(currentSong),
                     searchPlayingStyle = true,
                     activeTint = PlayingAccent,
+
                 )
                 if (index < tracks.lastIndex) {
                     HorizontalDivider(
@@ -614,6 +619,7 @@ private fun TopResultCard(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -851,6 +857,7 @@ private fun TypeaheadSongRow(
                 model = song.artworkAt(ROW_ART_PX),
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
+
             )
             if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
         }
@@ -859,7 +866,7 @@ private fun TypeaheadSongRow(
             Text(
                 text = song.title,
                 style = MaterialTheme.typography.titleMedium,
-                color = if (isCurrent) PlayingAccent else MaterialTheme.colorScheme.onBackground,
+                color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -964,6 +971,7 @@ private fun RecentSearchEntityRow(
             )
             if (isCurrent && isPlaying) {
                 SearchPlayingBars(Modifier.align(Alignment.Center))
+
             }
         }
         Spacer(Modifier.width(14.dp))

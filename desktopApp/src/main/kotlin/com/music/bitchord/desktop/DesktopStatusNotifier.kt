@@ -47,6 +47,7 @@ class TrayPixmap(
 
 @DBusInterfaceName(SNI_INTERFACE)
 interface StatusNotifierItem : DBusInterface {
+
     fun Activate(x: Int, y: Int)
     fun SecondaryActivate(x: Int, y: Int)
     fun ContextMenu(x: Int, y: Int)
@@ -93,13 +94,13 @@ internal class DesktopStatusNotifierController(
         if (!isLinuxSession()) {
             // AWT wants one image at the size the tray asks for, not a ladder of pixmaps for a
             // shell to choose from.
-            DesktopAwtTray.setIcon(renderSvg(svg, AWT_ICON_SIZE)?.toImage())
+            DesktopAwtTray.setIcon(renderTraySvg(svg, AWT_ICON_SIZE)?.toImage())
             return
         }
-        val rendered = ICON_SIZES.mapNotNull { size -> renderSvg(svg, size) }
+        val rendered = ICON_SIZES.mapNotNull { size -> renderTraySvg(svg, size) }
         if (rendered.isEmpty()) return
         synchronized(lock) { iconPixmaps = rendered }
-        publishProperties()
+        publishProperties(iconChanged = true)
     }
 
     fun start() {
@@ -194,11 +195,13 @@ internal class DesktopStatusNotifierController(
      * Pubblica le proprietà aggiornate e manda i segnali `NewIcon` / `NewToolTip`: Plasma e gli altri
      * host aggiornano l'icona solo in risposta a questi, non a `PropertiesChanged`.
      */
-    private fun publishProperties() {
+    private fun publishProperties(iconChanged: Boolean = false) {
         val bus = synchronized(lock) { connection } ?: return
         val runner = synchronized(lock) { worker } ?: return
         runner.execute {
             runCatching {
+                // StatusNotifier hosts listen to this signal to invalidate their icon cache.
+                if (iconChanged) bus.sendMessage(StatusNotifierItem.NewIcon(SNI_OBJECT_PATH))
                 bus.sendMessage(
                     Properties.PropertiesChanged(
                         SNI_OBJECT_PATH,
@@ -366,32 +369,37 @@ private fun loadPngPixmaps(resource: String): List<TrayPixmap> {
     return pixmaps
 }
 
-private fun renderSvg(svg: ByteArray, size: Int): TrayPixmap? = runCatching {
-    val dom = SVGDOM(Data.makeFromBytes(svg))
-    dom.setContainerSize(size.toFloat(), size.toFloat())
-    val surface = Surface.makeRasterN32Premul(size, size)
-    // The container size alone does not resize an SVG that declares absolute width and height.
-    val intrinsic = dom.root?.width?.value?.takeIf { it > 0f } ?: size.toFloat()
-    surface.canvas.scale(size / intrinsic, size / intrinsic)
-    dom.render(surface.canvas)
-    val bitmap = Bitmap()
-    bitmap.allocPixels(ImageInfo.makeN32Premul(size, size))
-    if (!surface.readPixels(bitmap, 0, 0)) return@runCatching null
-    val bytes = bitmap.readPixels() ?: return@runCatching null
+internal fun renderTraySvg(svg: ByteArray, size: Int): TrayPixmap? = runCatching {
+    Data.makeFromBytes(svg).use { data ->
+        SVGDOM(data).use { dom ->
+            dom.setContainerSize(size.toFloat(), size.toFloat())
+            Surface.makeRasterN32Premul(size, size).use { surface ->
+                // The container size alone does not resize an SVG with absolute dimensions.
+                val intrinsic = dom.root?.width?.value?.takeIf { it > 0f } ?: size.toFloat()
+                surface.canvas.scale(size / intrinsic, size / intrinsic)
+                dom.render(surface.canvas)
+                Bitmap().use { bitmap ->
+                    bitmap.allocPixels(ImageInfo.makeN32Premul(size, size))
+                    if (!surface.readPixels(bitmap, 0, 0)) return@runCatching null
+                    val bytes = bitmap.readPixels() ?: return@runCatching null
 
-    val argb = ByteArray(size * size * 4)
-    for (pixel in 0 until size * size) {
-        val at = pixel * 4
-        val b = bytes[at]
-        val g = bytes[at + 1]
-        val r = bytes[at + 2]
-        val a = bytes[at + 3]
-        argb[at] = a
-        argb[at + 1] = r
-        argb[at + 2] = g
-        argb[at + 3] = b
+                    val argb = ByteArray(size * size * 4)
+                    for (pixel in 0 until size * size) {
+                        val at = pixel * 4
+                        val b = bytes[at]
+                        val g = bytes[at + 1]
+                        val r = bytes[at + 2]
+                        val a = bytes[at + 3]
+                        argb[at] = a
+                        argb[at + 1] = r
+                        argb[at + 2] = g
+                        argb[at + 3] = b
+                    }
+                    TrayPixmap(size, size, argb)
+                }
+            }
+        }
     }
-    TrayPixmap(size, size, argb)
 }.getOrNull()
 
 /** A host picks whichever of these suits its bar; offering one forces a rescale. */

@@ -26,6 +26,19 @@ internal data class DesktopQueue(
     /** What is still to come, which is what "Up Next" means. */
     val upcoming: List<Song> get() = if (index >= songs.lastIndex) emptyList() else songs.drop(index + 1)
 
+    /** Replace one rendition in place, retaining the queue entry and its origin. */
+    fun withMediaVersion(expected: Song, replacement: Song): DesktopQueue? {
+        if (current !== expected || replacement.isVideo == expected.isVideo) return null
+        val item = replacement.copy(
+            isVideoOrigin = true, queueEntryId = expected.queueEntryId,
+            queueTier = expected.queueTier, radioName = expected.radioName,
+            playbackSource = expected.playbackSource,
+            playbackSourceType = expected.playbackSourceType,
+            playbackSourceId = expected.playbackSourceId,
+        )
+        return copy(songs = songs.toMutableList().apply { set(index, item) })
+    }
+
     /**
      * Moves to [target]. Backwards is a plain seek through history; forwards is the phone's queue
      * jump, which keeps everything the listener queued by hand and drops only what was skipped.
@@ -36,6 +49,24 @@ internal data class DesktopQueue(
         val rebuilt = QueueTimeline.buildJumpQueue(songs, index, target)
             ?: return copy(index = target).afterTransition()
         return copy(songs = songs.take(index + 1) + rebuilt, index = index + 1).afterTransition()
+    }
+
+    /**
+     * A music video and its audio recording are two versions of this same queue
+     * row. Do not enqueue another song or change the index; repeated tracks
+     * elsewhere in a playlist must retain their own identities.
+     *
+     * [expectedId] guards against a slow network lookup finishing after Next.
+     */
+    fun replaceCurrentVersion(expectedId: String, replacement: Song): DesktopQueue {
+        val active = current ?: return this
+        if (active.videoId != expectedId || replacement.videoId.isBlank()) return this
+        return copy(songs = songs.toMutableList().also { rows ->
+            rows[index] = replacement.copy(
+                queueEntryId = active.queueEntryId,
+                queueTier = active.queueTier,
+            )
+        })
     }
 
     fun next(): DesktopQueue = if (hasNext) copy(index = index + 1).afterTransition() else this
@@ -80,6 +111,15 @@ internal data class DesktopQueue(
         QueueTimeline.findUserQueueInsertionIndex(songs, index, isNext = playNext),
         song.asQueueEntry(QueueTier.USER_QUEUE),
     )
+
+    /** Adds an entire playlist with one queue rebuild (no per-track copies). */
+    fun enqueueBatch(tracks: List<Song>, playNext: Boolean): DesktopQueue {
+        if (tracks.isEmpty()) return this
+        val at = QueueTimeline.findUserQueueInsertionIndex(songs, index, isNext = playNext)
+        return copy(songs = songs.toMutableList().apply {
+            addAll(at, tracks.map { it.asQueueEntry(QueueTier.USER_QUEUE) })
+        })
+    }
 
     /** Adds tracks at the end — where AutoPlay's own additions go. */
     fun append(more: List<Song>): DesktopQueue =
