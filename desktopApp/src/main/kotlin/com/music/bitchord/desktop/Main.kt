@@ -32,6 +32,8 @@ import kotlinx.coroutines.swing.Swing
 import org.jetbrains.compose.resources.painterResource
 
 fun main() {
+    // A second launch (AppImage, .desktop, package) must bring the running window forward, not start another copy.
+    if (!DesktopSingleInstance.acquireOrSignal()) kotlin.system.exitProcess(0)
     DesktopStartupDiagnostics.record(DesktopStartupDiagnostics.Milestone.PROCESS_ENTRY)
     // Read the per-install welcome marker before services initialize or write preferences.
     val welcomeLaunch = DesktopWelcomeOnboarding.inspectStartup()
