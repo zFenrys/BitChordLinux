@@ -7902,26 +7902,6 @@ private fun DesktopSettingsScreen(
                             }
                         }
                     }
-                    val iconTitle = DesktopStrings["d_app_icon", "App icon"]
-                    val iconSubtitle = DesktopStrings[
-                        "d_app_icon_subtitle",
-                        "Change the window and tray icon instantly. Your choice is saved independently of the theme.",
-                    ]
-                    if (settingsRowVisible(iconTitle, iconSubtitle)) {
-                        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-                            Text(iconTitle, fontWeight = FontWeight.Medium)
-                            Text(iconSubtitle, color = DesktopSecondary, style = MaterialTheme.typography.bodySmall)
-                            DesktopAppIconPicker()
-                            Text(
-                                DesktopStrings[
-                                    "d_app_icon_launcher_note",
-                                    "Installed shortcuts and pinned launcher icons may keep the default Dark icon.",
-                                ],
-                                color = DesktopSecondary,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
                     val uiScalePercent by DesktopUiScaleSettings.percent.collectAsState()
                     val uiScaleTitle = DesktopStrings["d_ui_scale", "UI scale"]
                     val uiScaleSubtitle = DesktopStrings[
