@@ -153,8 +153,6 @@ internal fun LandscapePlayerLayout(
     queuePane: @Composable () -> Unit,
     /** Fork: time and volume kept under the sleeve while lyrics or the queue are up. */
     dock: (@Composable () -> Unit)? = null,
-    /** Fork: a tap on the sleeve. */
-    onArtworkClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -196,16 +194,7 @@ internal fun LandscapePlayerLayout(
                             .fillMaxWidth(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        val artworkTap = if (onArtworkClick != null) {
-                            Modifier.clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = onArtworkClick,
-                            )
-                        } else {
-                            Modifier
-                        }
-                        artwork(Modifier.size(minOf(maxWidth, maxHeight)).then(artworkTap))
+                        artwork(Modifier.size(minOf(maxWidth, maxHeight)))
                     }
                     AnimatedContent(
                         targetState = dock != null && pane != PlayerPane.Main,

@@ -2072,10 +2072,14 @@ fun NowPlayingScreen(
                                 // With a panel up the sleeve is the way back to
                                 // the player, as the portrait thumbnail is.
                                 .clickable(
-                                    enabled = panelOpen,
+                                    enabled = true,
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
                                 ) {
+                                    // Fork: on the main screen a tap on the sleeve is play/pause.
+                                    // Fork: always play/pause, with lyrics or the queue up as well.
+                                    onPlayPause()
+                                    return@clickable
                                     queueOpen = false
                                     closeLyrics()
                                 },
@@ -2194,7 +2198,6 @@ fun NowPlayingScreen(
                             }
                         }
                     },
-                    onArtworkClick = onPlayPause,
                     lyricsPane = videoLyricsPane,
                     queuePane = {
                         InlineQueue(
