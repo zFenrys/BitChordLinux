@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.player
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.union
 import com.music.bitchord.ui.components.ExplicitBadge
 import com.music.bitchord.ui.theme.stableStatusBarInsets
@@ -149,6 +151,10 @@ internal fun LandscapePlayerLayout(
     mainPane: @Composable (compact: Boolean) -> Unit,
     lyricsPane: @Composable () -> Unit,
     queuePane: @Composable () -> Unit,
+    /** Fork: time and volume kept under the sleeve while lyrics or the queue are up. */
+    dock: (@Composable () -> Unit)? = null,
+    /** Fork: a tap on the sleeve. */
+    onArtworkClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -190,7 +196,31 @@ internal fun LandscapePlayerLayout(
                             .fillMaxWidth(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        artwork(Modifier.size(minOf(maxWidth, maxHeight)))
+                        val artworkTap = if (onArtworkClick != null) {
+                            Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = onArtworkClick,
+                            )
+                        } else {
+                            Modifier
+                        }
+                        artwork(Modifier.size(minOf(maxWidth, maxHeight)).then(artworkTap))
+                    }
+                    AnimatedContent(
+                        targetState = dock != null && pane != PlayerPane.Main,
+                        modifier = Modifier.fillMaxWidth(),
+                        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(120)) },
+                        label = "landscapeDock",
+                    ) { show ->
+                        if (show && dock != null) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Spacer(Modifier.height(if (compact) 4.dp else 12.dp))
+                                dock()
+                            }
+                        } else {
+                            Spacer(Modifier.height(0.dp))
+                        }
                     }
                     Spacer(Modifier.height(if (compact) 12.dp else 24.dp))
                     actions()

@@ -2174,6 +2174,27 @@ fun NowPlayingScreen(
                             },
                         )
                     },
+                    dock = {
+                        Column(Modifier.fillMaxWidth()) {
+                            PlayerScrubber(
+                                shown = shown,
+                                durationMs = durationMs,
+                                loading = versionAligning || audioVersionSwitching,
+                                mixing = mixing && !scrub.scrubbing,
+                                transitionWindow = null,
+                                onScrub = onScrub,
+                                onScrubFinished = onScrubFinished,
+                            ) {}
+                            if (!hideVolumeBar) {
+                                VolumeRow(
+                                    value = { volume.level.value },
+                                    onValueChange = onVolumeChange,
+                                    onValueChangeFinished = onVolumeChangeFinished,
+                                )
+                            }
+                        }
+                    },
+                    onArtworkClick = onPlayPause,
                     lyricsPane = videoLyricsPane,
                     queuePane = {
                         InlineQueue(
