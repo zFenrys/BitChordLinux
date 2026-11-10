@@ -2862,6 +2862,12 @@ internal fun BitChordDesktopApp(welcomeLaunch: DesktopWelcomeOnboarding.Launch, 
         tray.update(title = title, isPlaying = playback.isPlaying)
         DesktopTrayMenu.publish(title = title, playing = playback.isPlaying)
     }
+    // Fork: a "now playing" notification when the track changes while the window is out of sight.
+    val playingNow by androidx.compose.runtime.rememberUpdatedState(playback.isPlaying)
+    LaunchedEffect(selectedSong?.videoId) {
+        val song = selectedSong ?: return@LaunchedEffect
+        DesktopTrackNotifier.onTrackChanged(song) { playingNow }
+    }
 
     LaunchedEffect(Unit) {
         // Unpacks the analyser and its models on first run in background scope
@@ -8082,6 +8088,43 @@ private fun DesktopSettingsScreen(
                         hideVolumeBar,
                         DesktopAppearanceSettings::setHideVolumeBar,
                     )
+                    val notifyEnabled by DesktopNotificationSettings.enabled.collectAsState()
+                    SettingsToggle(
+                        "Track notifications",
+                        "Show a notification when the song changes",
+                        notifyEnabled,
+                        DesktopNotificationSettings::setEnabled,
+                    )
+                    if (notifyEnabled) {
+                        val notifyOnlyUnfocused by DesktopNotificationSettings.onlyWhenUnfocused.collectAsState()
+                        SettingsToggle(
+                            "Only when BitChord is not in front",
+                            "Skip the notification while the window is open and focused",
+                            notifyOnlyUnfocused,
+                            DesktopNotificationSettings::setOnlyWhenUnfocused,
+                        )
+                        val notifyArtist by DesktopNotificationSettings.showArtist.collectAsState()
+                        SettingsToggle(
+                            "Show artist",
+                            "Add the artist under the song title",
+                            notifyArtist,
+                            DesktopNotificationSettings::setShowArtist,
+                        )
+                        val notifyAlbum by DesktopNotificationSettings.showAlbum.collectAsState()
+                        SettingsToggle(
+                            "Show album",
+                            "Add the album name, when the song has one",
+                            notifyAlbum,
+                            DesktopNotificationSettings::setShowAlbum,
+                        )
+                        val notifyCover by DesktopNotificationSettings.showCover.collectAsState()
+                        SettingsToggle(
+                            "Show cover",
+                            "Add the album art to the notification",
+                            notifyCover,
+                            DesktopNotificationSettings::setShowCover,
+                        )
+                    }
                 }
             }
             if (section == DesktopSettingsSection.AUDIO_QUALITY) item {
